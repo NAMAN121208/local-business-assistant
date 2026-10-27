@@ -313,6 +313,9 @@ export async function checkAvailability(params: {
 /**
  * Creates confirmed booking deterministically
  */
+// In-memory slot mutex to serialize concurrent booking confirmations for the exact same slot
+const activeSlotLocks = new Set<string>();
+
 export async function confirmBooking(params: {
   businessId: string;
   customerId: string;
@@ -321,13 +324,38 @@ export async function confirmBooking(params: {
   endTimeIso: string;
   notes?: string;
 }): Promise<Booking> {
-  return await db.createBooking({
-    business_id: params.businessId,
-    customer_id: params.customerId,
-    service: params.service,
-    start_time: params.startTimeIso,
-    end_time: params.endTimeIso,
-    status: 'confirmed',
-    notes: params.notes || null,
-  });
+  const lockKey = `${params.businessId}_${params.startTimeIso}`;
+  if (activeSlotLocks.has(lockKey)) {
+    throw new Error('Slot occupied: This slot has already been booked by another patient.');
+  }
+  activeSlotLocks.add(lockKey);
+
+  try {
+    const dateStr = params.startTimeIso.split('T')[0];
+    const existingBookings = await db.findBookings(params.businessId, {
+      date: dateStr,
+      status: 'confirmed',
+    });
+
+    const targetMs = new Date(params.startTimeIso).getTime();
+    const alreadyBooked = existingBookings.some(
+      (b) => b.status === 'confirmed' && new Date(b.start_time).getTime() === targetMs
+    );
+
+    if (alreadyBooked) {
+      throw new Error('Slot occupied: This slot has already been booked by another patient.');
+    }
+
+    return await db.createBooking({
+      business_id: params.businessId,
+      customer_id: params.customerId,
+      service: params.service,
+      start_time: params.startTimeIso,
+      end_time: params.endTimeIso,
+      status: 'confirmed',
+      notes: params.notes || null,
+    });
+  } finally {
+    activeSlotLocks.delete(lockKey);
+  }
 }
