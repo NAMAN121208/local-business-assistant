@@ -44,13 +44,13 @@ export async function GET() {
 
       const res: any = await Promise.race([queryPromise, timeoutPromise]);
       if (res?.error) {
-        supabaseError = res.error.message;
+        supabaseError = 'Supabase ping error';
       } else {
         supabaseConnected = true;
         supabaseLatencyMs = Date.now() - start;
       }
     } catch (err: any) {
-      supabaseError = err.message || 'Supabase connectivity check failed';
+      supabaseError = 'Supabase ping timed out or unreachable';
     }
   }
 

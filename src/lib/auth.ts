@@ -81,7 +81,7 @@ export async function verifySessionToken(token?: string | null): Promise<boolean
     const key = await getHmacKey(secret);
     const sigBytes = hexToBuffer(providedSignatureHex);
     const dataBytes = new TextEncoder().encode(timestampStr);
-    return await crypto.subtle.verify('HMAC', key, sigBytes, dataBytes);
+    return await crypto.subtle.verify('HMAC', key, sigBytes as unknown as BufferSource, dataBytes as unknown as BufferSource);
   } catch {
     return false;
   }
@@ -138,8 +138,8 @@ export async function verifyCustomerSessionToken(
     return await crypto.subtle.verify(
       'HMAC',
       key,
-      sigBytes,
-      new TextEncoder().encode(conversationId)
+      sigBytes as unknown as BufferSource,
+      new TextEncoder().encode(conversationId) as unknown as BufferSource
     );
   } catch {
     return false;
