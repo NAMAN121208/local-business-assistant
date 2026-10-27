@@ -26,6 +26,11 @@ export default function ConversationDetailPage() {
   const [replyText, setReplyText] = useState('');
   const [sending, setSending] = useState(false);
   const [resolving, setResolving] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const fetchThread = async () => {
     try {
@@ -105,7 +110,13 @@ export default function ConversationDetailPage() {
     );
   }
 
-  const { conversation, customer, messages, escalation } = data;
+  const { conversation, customer, messages = [], escalation } = data;
+  const customerName = customer?.name || 'Anonymous Patient';
+  const customerContact = customer?.contact || 'Web Chat';
+
+  const lastCustomerQuery = Array.isArray(messages)
+    ? [...messages].reverse().find((m: any) => m.sender === 'customer')?.text || ''
+    : '';
 
   return (
     <div className="space-y-6">
@@ -120,8 +131,8 @@ export default function ConversationDetailPage() {
           </Link>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-lg font-bold text-slate-900">{customer.name}</h1>
-              <span className="text-xs text-slate-400">({customer.contact})</span>
+              <h1 className="text-lg font-bold text-slate-900">{customerName}</h1>
+              <span className="text-xs text-slate-400">({customerContact})</span>
               {conversation.status === 'needs_human' && (
                 <span className="bg-rose-50 text-rose-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-rose-200 animate-pulse">
                   Needs Human Attention
@@ -169,11 +180,13 @@ export default function ConversationDetailPage() {
                 <h3 className="text-sm font-bold text-rose-900">
                   Escalation Trigger: {escalation.reason}
                 </h3>
-                <span className="text-[10px] text-rose-600 font-mono">
-                  {new Date(escalation.created_at).toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
+                <span className="text-[10px] text-rose-600 font-mono" suppressHydrationWarning>
+                  {mounted && escalation.created_at
+                    ? new Date(escalation.created_at).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })
+                    : ''}
                 </span>
               </div>
               <p className="text-xs text-rose-800">
@@ -196,79 +209,82 @@ export default function ConversationDetailPage() {
         </h2>
 
         <div className="space-y-3.5 max-h-[500px] overflow-y-auto pr-1">
-          {messages.map((m: any) => {
-            const isUser = m.sender === 'customer';
-            const isOwner = m.sender === 'owner';
-
-            return (
-              <div
-                key={m.id}
-                className={`flex flex-col ${
-                  isOwner ? 'items-end' : isUser ? 'items-start' : 'items-start'
-                }`}
-              >
-                <div
-                  className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap leading-relaxed shadow-sm ${
-                    isOwner
-                      ? 'bg-emerald-900 text-white rounded-br-none'
-                      : isUser
-                      ? 'bg-slate-100 text-slate-900 rounded-bl-none border border-slate-200'
-                      : 'bg-white text-slate-800 border-2 border-teal-500/70 rounded-bl-none'
-                  }`}
-                >
-                  {isOwner && (
-                    <div className="text-[10px] font-semibold text-emerald-200 mb-1 flex items-center gap-1">
-                      <Stethoscope className="w-3 h-3" /> Clinic Staff (Owner)
-                    </div>
-                  )}
-                  {m.sender === 'bot' && (
-                    <div className="text-[10px] font-semibold text-teal-700 mb-1 flex items-center gap-1">
-                      <Sparkles className="w-3 h-3" /> Clinic Bot
-                    </div>
-                  )}
-                  {m.text}
-                </div>
-
-                {/* Metadata inspection */}
-                <div className="flex items-center gap-2 mt-1 px-1 text-[10px] text-slate-400">
-                  <span>
-                    {new Date(m.created_at).toLocaleTimeString([], {
+          {Array.isArray(messages) &&
+            messages.map((m: any) => {
+              const isUser = m.sender === 'customer';
+              const isOwner = m.sender === 'owner';
+              const timeDisplay =
+                mounted && m.created_at
+                  ? new Date(m.created_at).toLocaleTimeString([], {
                       hour: '2-digit',
                       minute: '2-digit',
-                    })}
-                  </span>
+                    })
+                  : '';
 
-                  {m.sender === 'bot' && (
-                    <>
-                      {m.intent && (
-                        <span className="font-mono bg-slate-100 px-1 py-0.5 rounded text-slate-600">
-                          intent:{m.intent}
-                        </span>
-                      )}
-                      {m.decision && (
-                        <span
-                          className={`font-semibold px-1 py-0.5 rounded ${
-                            m.decision === 'answer'
-                              ? 'bg-emerald-50 text-emerald-700'
-                              : m.decision === 'act'
-                              ? 'bg-blue-50 text-blue-700'
-                              : 'bg-amber-50 text-amber-800'
-                          }`}
-                        >
-                          decision:{m.decision}
-                        </span>
-                      )}
-                      {m.provider && (
-                        <span className="font-mono bg-teal-50 text-teal-700 px-1 py-0.5 rounded border border-teal-200">
-                          {m.provider}
-                        </span>
-                      )}
-                    </>
-                  )}
+              return (
+                <div
+                  key={m.id}
+                  className={`flex flex-col ${
+                    isOwner ? 'items-end' : isUser ? 'items-start' : 'items-start'
+                  }`}
+                >
+                  <div
+                    className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap leading-relaxed shadow-sm ${
+                      isOwner
+                        ? 'bg-emerald-900 text-white rounded-br-none'
+                        : isUser
+                        ? 'bg-slate-100 text-slate-900 rounded-bl-none border border-slate-200'
+                        : 'bg-white text-slate-800 border-2 border-teal-500/70 rounded-bl-none'
+                    }`}
+                  >
+                    {isOwner && (
+                      <div className="text-[10px] font-semibold text-emerald-200 mb-1 flex items-center gap-1">
+                        <Stethoscope className="w-3 h-3" /> Clinic Staff (Owner)
+                      </div>
+                    )}
+                    {m.sender === 'bot' && (
+                      <div className="text-[10px] font-semibold text-teal-700 mb-1 flex items-center gap-1">
+                        <Sparkles className="w-3 h-3" /> Clinic Bot
+                      </div>
+                    )}
+                    {m.text}
+                  </div>
+
+                  {/* Metadata inspection */}
+                  <div className="flex items-center gap-2 mt-1 px-1 text-[10px] text-slate-400">
+                    <span suppressHydrationWarning>{timeDisplay}</span>
+
+                    {m.sender === 'bot' && (
+                      <>
+                        {m.intent && (
+                          <span className="font-mono bg-slate-100 px-1 py-0.5 rounded text-slate-600">
+                            intent:{m.intent}
+                          </span>
+                        )}
+                        {m.decision && (
+                          <span
+                            className={`font-semibold px-1 py-0.5 rounded ${
+                              m.decision === 'answer'
+                                ? 'bg-emerald-50 text-emerald-700'
+                                : m.decision === 'act'
+                                ? 'bg-blue-50 text-blue-700'
+                                : 'bg-amber-50 text-amber-800'
+                            }`}
+                          >
+                            decision:{m.decision}
+                          </span>
+                        )}
+                        {m.provider && (
+                          <span className="font-mono bg-teal-50 text-teal-700 px-1 py-0.5 rounded border border-teal-200">
+                            {m.provider}
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
         </div>
 
         {/* Owner Reply Form */}
@@ -295,15 +311,15 @@ export default function ConversationDetailPage() {
           </div>
           <div className="flex items-center justify-between text-[11px] text-slate-400">
             <span>Customer chat updates live via polling.</span>
-            <Link
-              href={`/owner/unanswered?query=${encodeURIComponent(
-                messages.filter((m: any) => m.sender === 'customer').pop()?.text || ''
-              )}`}
-              className="text-teal-600 hover:text-teal-700 font-medium flex items-center gap-1 hover:underline"
-            >
-              <HelpCircle className="w-3.5 h-3.5" />
-              Dictate permanent KB fix for this inquiry →
-            </Link>
+            {lastCustomerQuery && (
+              <Link
+                href={`/owner/unanswered?query=${encodeURIComponent(lastCustomerQuery)}`}
+                className="text-teal-600 hover:text-teal-700 font-medium flex items-center gap-1 hover:underline"
+              >
+                <HelpCircle className="w-3.5 h-3.5" />
+                Dictate permanent KB fix for this inquiry →
+              </Link>
+            )}
           </div>
         </form>
       </div>

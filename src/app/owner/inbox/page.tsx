@@ -20,15 +20,15 @@ interface ConversationSummary {
   channel: string;
   createdAt: string;
   updatedAt: string;
-  customer: {
-    id: string;
-    name: string;
-    contact: string;
+  customer?: {
+    id?: string;
+    name?: string;
+    contact?: string;
   };
-  lastMessage: {
-    text: string;
-    sender: string;
-    createdAt: string;
+  lastMessage?: {
+    text?: string;
+    sender?: string;
+    createdAt?: string;
   } | null;
   latestDecision?: string;
   latestIntent?: string;
@@ -39,6 +39,11 @@ export default function OwnerInboxPage() {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [filter, setFilter] = useState<'all' | 'needs_human' | 'open' | 'resolved'>('all');
   const [loading, setLoading] = useState(true);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const fetchConversations = async () => {
     try {
@@ -49,10 +54,13 @@ export default function OwnerInboxPage() {
       const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
-        setConversations(data.conversations || []);
+        setConversations(Array.isArray(data?.conversations) ? data.conversations : []);
+      } else {
+        setConversations([]);
       }
     } catch (e) {
-      console.error(e);
+      console.error('Fetch conversations error:', e);
+      setConversations([]);
     } finally {
       setLoading(false);
     }
@@ -126,69 +134,78 @@ export default function OwnerInboxPage() {
         </div>
       ) : (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden divide-y divide-slate-100">
-          {conversations.map((conv) => (
-            <Link
-              key={conv.id}
-              href={`/owner/inbox/${conv.id}`}
-              className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50/80 transition group"
-            >
-              <div className="space-y-1.5 flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-semibold text-slate-900 text-sm flex items-center gap-1.5">
-                    <User className="w-4 h-4 text-slate-400" />
-                    {conv.customer.name}
-                  </span>
-                  <span className="text-xs text-slate-400">({conv.customer.contact})</span>
-
-                  {/* Status Badge */}
-                  {conv.status === 'needs_human' && (
-                    <span className="bg-rose-50 text-rose-700 border border-rose-200/80 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 animate-pulse">
-                      <ShieldAlert className="w-3 h-3" /> Needs Human
-                    </span>
-                  )}
-                  {conv.status === 'open' && (
-                    <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-semibold px-2 py-0.5 rounded-full">
-                      Open
-                    </span>
-                  )}
-                  {conv.status === 'resolved' && (
-                    <span className="bg-slate-100 text-slate-600 text-[10px] font-medium px-2 py-0.5 rounded-full">
-                      Resolved
-                    </span>
-                  )}
-
-                  {/* Intent & Provider Badges */}
-                  {conv.latestIntent && (
-                    <span className="bg-slate-100 text-slate-600 font-mono text-[10px] px-2 py-0.5 rounded">
-                      {conv.latestIntent}
-                    </span>
-                  )}
-                  {conv.provider && (
-                    <span className="bg-teal-50 text-teal-700 border border-teal-200 text-[10px] font-mono px-1.5 py-0.5 rounded">
-                      {conv.provider}
-                    </span>
-                  )}
-                </div>
-
-                <p className="text-sm text-slate-600 truncate max-w-2xl">
-                  {conv.lastMessage ? conv.lastMessage.text : 'No messages yet'}
-                </p>
-              </div>
-
-              <div className="flex items-center justify-between sm:justify-end gap-3 text-xs text-slate-400 flex-shrink-0">
-                <span className="flex items-center gap-1">
-                  <Clock className="w-3.5 h-3.5" />
-                  {new Date(conv.updatedAt).toLocaleTimeString([], {
+          {conversations.map((conv) => {
+            const customerName = conv.customer?.name || 'Anonymous Patient';
+            const customerContact = conv.customer?.contact || 'Web Chat';
+            const lastMsgText = conv.lastMessage?.text || 'No messages yet';
+            const updatedAtStr = conv.updatedAt || conv.createdAt;
+            const timeDisplay =
+              mounted && updatedAtStr
+                ? new Date(updatedAtStr).toLocaleTimeString([], {
                     hour: '2-digit',
                     minute: '2-digit',
-                  })}
-                </span>
-                <span className="text-teal-600 group-hover:translate-x-1 transition font-medium flex items-center gap-1">
-                  View Thread <ArrowRight className="w-3.5 h-3.5" />
-                </span>
-              </div>
-            </Link>
-          ))}
+                  })
+                : '';
+
+            return (
+              <Link
+                key={conv.id}
+                href={`/owner/inbox/${conv.id}`}
+                className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50/80 transition group"
+              >
+                <div className="space-y-1.5 flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold text-slate-900 text-sm flex items-center gap-1.5">
+                      <User className="w-4 h-4 text-slate-400" />
+                      {customerName}
+                    </span>
+                    <span className="text-xs text-slate-400">({customerContact})</span>
+
+                    {/* Status Badge */}
+                    {conv.status === 'needs_human' && (
+                      <span className="bg-rose-50 text-rose-700 border border-rose-200/80 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 animate-pulse">
+                        <ShieldAlert className="w-3 h-3" /> Needs Human
+                      </span>
+                    )}
+                    {conv.status === 'open' && (
+                      <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-semibold px-2 py-0.5 rounded-full">
+                        Open
+                      </span>
+                    )}
+                    {conv.status === 'resolved' && (
+                      <span className="bg-slate-100 text-slate-600 text-[10px] font-medium px-2 py-0.5 rounded-full">
+                        Resolved
+                      </span>
+                    )}
+
+                    {/* Intent & Provider Badges */}
+                    {conv.latestIntent && (
+                      <span className="bg-slate-100 text-slate-600 font-mono text-[10px] px-2 py-0.5 rounded">
+                        {conv.latestIntent}
+                      </span>
+                    )}
+                    {conv.provider && (
+                      <span className="bg-teal-50 text-teal-700 border border-teal-200 text-[10px] font-mono px-1.5 py-0.5 rounded">
+                        {conv.provider}
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="text-sm text-slate-600 truncate max-w-2xl">{lastMsgText}</p>
+                </div>
+
+                <div className="flex items-center justify-between sm:justify-end gap-3 text-xs text-slate-400 flex-shrink-0">
+                  <span className="flex items-center gap-1" suppressHydrationWarning>
+                    <Clock className="w-3.5 h-3.5" />
+                    {timeDisplay}
+                  </span>
+                  <span className="text-teal-600 group-hover:translate-x-1 transition font-medium flex items-center gap-1">
+                    View Thread <ArrowRight className="w-3.5 h-3.5" />
+                  </span>
+                </div>
+              </Link>
+            );
+          })}
         </div>
       )}
     </div>

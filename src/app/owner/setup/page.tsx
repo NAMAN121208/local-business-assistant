@@ -444,13 +444,15 @@ export default function VoiceSetupPage() {
                     {ver.raw_source_text || 'Structured configuration'}
                   </p>
                 </div>
-                <span className="text-slate-400 text-[11px]">
-                  {new Date(ver.created_at).toLocaleDateString([], {
-                    month: 'short',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
+                <span className="text-slate-400 text-[11px]" suppressHydrationWarning>
+                  {ver.created_at
+                    ? new Date(ver.created_at).toLocaleDateString([], {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })
+                    : ''}
                 </span>
               </div>
             ))}

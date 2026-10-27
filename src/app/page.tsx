@@ -259,7 +259,7 @@ export default function CustomerChatPage() {
 
               {/* Message Badges & Timestamps */}
               <div className="flex items-center gap-2 mt-1 px-1 text-[10px] text-slate-400">
-                <span>{m.timestamp}</span>
+                <span suppressHydrationWarning>{m.timestamp}</span>
                 {isOwner && (
                   <span className="text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/60 font-medium">
                     Verified Clinic Staff

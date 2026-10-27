@@ -447,17 +447,17 @@ export class DBClient {
     unreadEscalationsCount: number;
     totalBookingsToday: number;
   }> {
-    const conversations = await this.getAllConversations(businessId);
-    const needsHumanCount = conversations.filter((c) => c.status === 'needs_human').length;
+    const conversations = (await this.getAllConversations(businessId)) || [];
+    const needsHumanCount = conversations.filter((c) => c && c.status === 'needs_human').length;
 
-    const escalations = await this.getEscalations();
-    const unreadEscalationsCount = escalations.filter((e) => e.status === 'open' && !e.is_read).length;
+    const escalations = (await this.getEscalations()) || [];
+    const unreadEscalationsCount = escalations.filter((e) => e && e.status === 'open' && !e.is_read).length;
 
     const todayStr = new Date().toISOString().split('T')[0];
-    const bookings = await this.findBookings(businessId);
-    const unreadBookingsCount = bookings.filter((b) => !b.is_read).length;
+    const bookings = (await this.findBookings(businessId)) || [];
+    const unreadBookingsCount = bookings.filter((b) => b && !b.is_read).length;
     const totalBookingsToday = bookings.filter(
-      (b) => b.start_time.startsWith(todayStr) && b.status === 'confirmed'
+      (b) => b && b.start_time && b.start_time.startsWith(todayStr) && b.status === 'confirmed'
     ).length;
 
     return {

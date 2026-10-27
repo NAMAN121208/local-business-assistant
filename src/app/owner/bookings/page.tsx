@@ -7,8 +7,6 @@ import {
   User,
   XCircle,
   CheckCircle2,
-  AlertCircle,
-  Filter,
   RefreshCw,
 } from 'lucide-react';
 
@@ -29,13 +27,18 @@ export default function OwnerBookingsPage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'confirmed' | 'cancelled'>('all');
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const fetchBookings = async () => {
     try {
       const res = await fetch('/api/owner/bookings');
       if (res.ok) {
         const data = await res.json();
-        setBookings(data.bookings || []);
+        setBookings(Array.isArray(data?.bookings) ? data.bookings : []);
       }
     } catch (e) {
       console.error(e);
@@ -135,13 +138,19 @@ export default function OwnerBookingsPage() {
       ) : (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden divide-y divide-slate-100">
           {filteredBookings.map((b) => {
-            const startDate = new Date(b.start_time);
-            const timeStr = startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            const dateStr = startDate.toLocaleDateString([], {
-              weekday: 'short',
-              month: 'short',
-              day: 'numeric',
-            });
+            const startDate = b.start_time ? new Date(b.start_time) : null;
+            const timeStr =
+              mounted && startDate
+                ? startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                : '';
+            const dateStr =
+              mounted && startDate
+                ? startDate.toLocaleDateString([], {
+                    weekday: 'short',
+                    month: 'short',
+                    day: 'numeric',
+                  })
+                : '';
 
             const isConfirmed = b.status === 'confirmed';
 
@@ -157,9 +166,9 @@ export default function OwnerBookingsPage() {
                     </span>
                     <span className="font-semibold text-slate-900 text-sm flex items-center gap-1.5">
                       <User className="w-4 h-4 text-slate-400" />
-                      {b.customerName}
+                      {b.customerName || 'Patient'}
                     </span>
-                    <span className="text-xs text-slate-400">({b.customerContact})</span>
+                    <span className="text-xs text-slate-400">({b.customerContact || 'Web Chat'})</span>
 
                     {/* Status Badge */}
                     {isConfirmed ? (
@@ -179,11 +188,16 @@ export default function OwnerBookingsPage() {
 
                 <div className="flex items-center justify-between sm:justify-end gap-4 flex-shrink-0">
                   <div className="text-right">
-                    <div className="text-xs font-bold text-slate-900 flex items-center gap-1 sm:justify-end">
+                    <div
+                      className="text-xs font-bold text-slate-900 flex items-center gap-1 sm:justify-end"
+                      suppressHydrationWarning
+                    >
                       <Clock className="w-3.5 h-3.5 text-teal-600" />
                       {timeStr}
                     </div>
-                    <div className="text-[11px] text-slate-500">{dateStr}</div>
+                    <div className="text-[11px] text-slate-500" suppressHydrationWarning>
+                      {dateStr}
+                    </div>
                   </div>
 
                   {isConfirmed && (

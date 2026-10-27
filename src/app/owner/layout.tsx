@@ -11,12 +11,12 @@ import {
   LogOut,
   ExternalLink,
   Stethoscope,
-  Bell,
 } from 'lucide-react';
 
 export default function OwnerLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+
   const [stats, setStats] = useState<{
     needsHumanCount: number;
     unreadBookingsCount: number;
@@ -27,33 +27,48 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
     unreadEscalationsCount: 0,
   });
 
-  // Don't render owner shell on login page
-  if (pathname === '/owner/login') {
-    return <>{children}</>;
-  }
+  const [mounted, setMounted] = useState(false);
+  const isLoginPage = pathname === '/owner/login';
 
   const fetchStats = async () => {
+    if (isLoginPage) return;
     try {
       const res = await fetch('/api/owner/stats');
       if (res.ok) {
         const data = await res.json();
-        setStats(data);
+        setStats({
+          needsHumanCount: Number(data?.needsHumanCount) || 0,
+          unreadBookingsCount: Number(data?.unreadBookingsCount) || 0,
+          unreadEscalationsCount: Number(data?.unreadEscalationsCount) || 0,
+        });
       }
     } catch (e) {
-      // ignore
+      // quiet fail
     }
   };
 
   useEffect(() => {
-    fetchStats();
-    const interval = setInterval(fetchStats, 5000);
-    return () => clearInterval(interval);
-  }, [pathname]);
+    setMounted(true);
+    if (!isLoginPage) {
+      fetchStats();
+      const interval = setInterval(fetchStats, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [pathname, isLoginPage]);
 
   const handleLogout = async () => {
-    await fetch('/api/owner/logout', { method: 'POST' });
+    try {
+      await fetch('/api/owner/logout', { method: 'POST' });
+    } catch (e) {
+      // quiet
+    }
     router.push('/owner/login');
   };
+
+  // If on login page, render children directly without owner shell
+  if (isLoginPage) {
+    return <>{children}</>;
+  }
 
   const navItems = [
     {
@@ -108,7 +123,7 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
           {/* Desktop Nav */}
           <nav className="hidden md:flex items-center space-x-1">
             {navItems.map((item) => {
-              const active = pathname.startsWith(item.href);
+              const active = Boolean(pathname && pathname.startsWith(item.href));
               return (
                 <Link
                   key={item.name}
@@ -121,7 +136,7 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
                 >
                   <item.icon className="w-4 h-4" />
                   <span>{item.name}</span>
-                  {item.badge > 0 && (
+                  {mounted && item.badge > 0 && (
                     <span
                       className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
                         item.badgeColor || 'bg-slate-700 text-white'
@@ -161,7 +176,7 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
       {/* Mobile Sub-Navigation Bar */}
       <div className="md:hidden bg-slate-800 text-slate-300 border-b border-slate-700 overflow-x-auto no-scrollbar flex">
         {navItems.map((item) => {
-          const active = pathname.startsWith(item.href);
+          const active = Boolean(pathname && pathname.startsWith(item.href));
           return (
             <Link
               key={item.name}
@@ -174,7 +189,7 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
             >
               <div className="relative">
                 <item.icon className="w-4 h-4" />
-                {item.badge > 0 && (
+                {mounted && item.badge > 0 && (
                   <span
                     className={`absolute -top-1.5 -right-2.5 text-[9px] font-bold px-1 rounded-full ${
                       item.badgeColor || 'bg-rose-500 text-white'

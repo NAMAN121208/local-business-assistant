@@ -207,11 +207,13 @@ function UnansweredQuestionsContent() {
                       <span className="text-amber-700 font-medium truncate max-w-[150px]">
                         {esc.reason}
                       </span>
-                      <span>
-                        {new Date(esc.createdAt).toLocaleTimeString([], {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
+                      <span suppressHydrationWarning>
+                        {esc.createdAt
+                          ? new Date(esc.createdAt).toLocaleTimeString([], {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })
+                          : ''}
                       </span>
                     </div>
                   </button>
