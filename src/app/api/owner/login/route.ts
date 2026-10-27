@@ -5,18 +5,8 @@ import { getOwnerPassword, setSessionCookie } from '@/lib/auth';
 export async function POST(req: NextRequest) {
   try {
     const correctPassword = getOwnerPassword();
-
-    if (!correctPassword) {
-      return NextResponse.json(
-        {
-          error:
-            'OWNER_PASSWORD environment variable is not configured. Owner console login is disabled.',
-        },
-        { status: 503 }
-      );
-    }
-
-    const { password } = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const { password } = body;
 
     if (!password || password !== correctPassword) {
       return NextResponse.json({ error: 'Incorrect owner password' }, { status: 401 });

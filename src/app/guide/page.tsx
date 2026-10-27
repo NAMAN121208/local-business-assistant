@@ -172,7 +172,7 @@ export default function GuidePage() {
               Credentials Note for Judges:
             </p>
             <p>
-              The owner console login password is provided directly in the hackathon submission form text. Enter it at the login screen to access the <strong>Inbox</strong>, <strong>Voice KB Setup</strong>, <strong>Unanswered Questions</strong>, and <strong>Daily Summary</strong>.
+              Owner Console Password: <code className="font-mono font-bold bg-white px-2 py-0.5 rounded border border-amber-300 text-teal-800">owner123</code>. Enter it at the login screen to access the <strong>Inbox</strong>, <strong>Voice KB Setup</strong>, <strong>Unanswered Questions</strong>, and <strong>Daily Summary</strong>.
             </p>
           </div>
 
