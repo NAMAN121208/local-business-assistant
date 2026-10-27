@@ -149,6 +149,19 @@ export const TEMPLATES = {
     kn_latin: () =>
       `City Health Clinic contact madಿದ್ದಕ್ಕೆ ಧನ್ಯವಾದಗಳು. Automated assistant busy aagide. Namma clinic team bega reply maduththeve.`,
   },
+
+  unanswered_holding: {
+    en: () =>
+      `Thank you for reaching out to City Health Clinic. I will check this with our clinic staff and have someone assist you shortly with accurate details.`,
+    hi: () =>
+      `सिटी हेल्थ क्लिनिक से संपर्क करने के लिए धन्यवाद। मैं हमारी क्लिनिक टीम से इसकी पुष्टि करूँगा और हमारे स्टाफ सदस्य जल्द ही आपकी सहायता करेंगे।`,
+    hi_latin: () =>
+      `City Health Clinic se contact karne ke liye dhanyawad. Main hamari clinic staff se check karke confirm karunga aur hamari team jaldi hi aapki madad karegi.`,
+    kn: () =>
+      `ಸಿಟಿ ಹೆಲ್ತ್ ಕ್ಲಿನಿಕ್ ಅನ್ನು ಸಂಪರ್ಕಿಸಿದ್ದಕ್ಕಾಗಿ ಧನ್ಯವಾದಗಳು. ನಾನು ನಮ್ಮ ಕ್ಲಿನಿಕ್ ಸಿಬ್ಬಂದಿಯೊಂದಿಗೆ ಪರಿಶೀಲಿಸುತ್ತೇನೆ ಮತ್ತು ನಮ್ಮ ತಂಡವು ಶೀಘ್ರದಲ್ಲೇ ನಿಮಗೆ ನಿಖರವಾದ ವಿವರಗಳನ್ನು ನೀಡಲಿದೆ.`,
+    kn_latin: () =>
+      `City Health Clinic contact madಿದ್ದಕ್ಕೆ ಧನ್ಯವಾದಗಳು. Namma clinic staff jothe check madi bega reply maduththeve.`,
+  },
 };
 
 export function getLocalizedTemplate<T extends keyof typeof TEMPLATES>(

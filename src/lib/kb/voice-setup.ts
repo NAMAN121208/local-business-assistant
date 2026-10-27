@@ -336,11 +336,23 @@ export function applySemanticCorrectionFallback(
 
   // 3. Prohibited topics / Custom guardrails (General)
   // e.g. "Never discuss pricing over chat, ask them to call"
+  const isFacilityOrTieUp =
+    lower.includes('tie-up') ||
+    lower.includes('partner') ||
+    lower.includes('discount') ||
+    lower.includes('in-house') ||
+    lower.includes('across the street') ||
+    lower.includes('diagnostics') ||
+    lower.includes('scan') ||
+    lower.includes('facility') ||
+    lower.includes('facilities');
+
   if (
-    lower.includes('never') ||
-    lower.includes("don't") ||
-    lower.includes('do not') ||
-    lower.includes('ask them to call')
+    !isFacilityOrTieUp &&
+    (lower.includes('never') ||
+      lower.includes("don't") ||
+      lower.includes('do not') ||
+      lower.includes('ask them to call'))
   ) {
     if (lower.includes('pricing') || lower.includes('price') || lower.includes('fee')) {
       const rule = 'Discussing or quoting procedure and treatment pricing over chat (patients must call clinic directly)';
@@ -378,26 +390,35 @@ export function applySemanticCorrectionFallback(
   // 4. General informational FAQ additions/updates (e.g. equipment, diagnostic tie-ups, clinic facilities)
   const isHoursChange = lower.includes('close') || lower.includes('hours') || lower.includes('timings');
   const isServiceChange = lower.includes('added') || lower.includes('add ') || lower.includes('new service');
-  const isProhibitionChange = lower.includes('never') || lower.includes("don't") || lower.includes('do not');
+  const isProhibitionChange = !isFacilityOrTieUp && (lower.includes('never') || lower.includes("don't") || lower.includes('do not'));
 
   if (!isHoursChange && !isServiceChange && !isProhibitionChange) {
     const stopWords = new Set([
       'have', 'with', 'that', 'this', 'where', 'receive', 'clinic', 'official',
-      'does', 'from', 'into', 'what', 'when', 'some', 'about', 'they', 'their'
+      'does', 'from', 'into', 'what', 'when', 'some', 'about', 'they', 'their',
+      'the', 'and', 'for', 'are', 'we', 'do', 'not', 'an', 'or', 'in'
     ]);
     const extractedKeywords = lower
       .replace(/[^\w\s]/g, ' ')
       .split(/\s+/)
-      .filter((w) => w.length > 2 && !stopWords.has(w));
+      .filter((w) => w.length >= 2 && !stopWords.has(w));
+
+    if (lower.includes('mri') && !extractedKeywords.includes('mri')) extractedKeywords.push('mri');
+    if (lower.includes('ct') && !extractedKeywords.includes('ct')) extractedKeywords.push('ct');
+    if (lower.includes('scan') && !extractedKeywords.includes('scan')) extractedKeywords.push('scan');
 
     const faqId = `faq_info_${Date.now()}`;
-    const question = `Do you offer ${extractedKeywords.slice(0, 3).join(' ')} or related facilities?`;
+    const question =
+      lower.includes('mri') || lower.includes('ct')
+        ? 'Do you offer MRI and CT scan facilities?'
+        : `Do you offer ${extractedKeywords.slice(0, 3).join(' ')} or related facilities?`;
+
     candidateContent.faqs.unshift({
       id: faqId,
       question,
       answer: correctionText.trim(),
       category: 'facilities',
-      keywords: extractedKeywords.slice(0, 10),
+      keywords: Array.from(new Set(extractedKeywords)),
     });
   }
 
