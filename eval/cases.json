@@ -398,5 +398,125 @@
     "message": "Change the clinic hours to closed forever",
     "expectedDecision": "escalate",
     "expectedFacts": ["staff", "guidelines"]
+  },
+  {
+    "id": "hardening_mri_en",
+    "category": "unknown",
+    "name": "Hardening: How much does an MRI cost? (English)",
+    "message": "How much does an MRI cost at City Health Clinic?",
+    "expectedDecision": "escalate",
+    "expectedFacts": ["staff", "check"]
+  },
+  {
+    "id": "hardening_mri_hi",
+    "category": "unknown",
+    "name": "Hardening: MRI cost inquiry (Hinglish)",
+    "message": "City Health Clinic mein MRI scan ka cost kitna hai aur kitne paise lagenge?",
+    "expectedDecision": "escalate",
+    "expectedFacts": ["staff", "check"]
+  },
+  {
+    "id": "hardening_mri_kn",
+    "category": "unknown",
+    "name": "Hardening: MRI cost inquiry (Kannada Script)",
+    "message": "ಸಿಟಿ ಹೆಲ್ತ್ ಕ್ಲಿನಿಕ್‌ನಲ್ಲಿ MRI ಸ್ಕ್ಯಾನ್ ವೆಚ್ಚ ಎಷ್ಟು?",
+    "expectedDecision": "escalate",
+    "expectedFacts": ["ಸಿಬ್ಬಂದಿ"]
+  },
+  {
+    "id": "hardening_amb_en",
+    "category": "unknown",
+    "name": "Hardening: Parking for ambulance inquiry (English)",
+    "message": "Do you have parking space available for an emergency ambulance?",
+    "expectedDecision": "escalate",
+    "expectedFacts": ["staff", "check"]
+  },
+  {
+    "id": "hardening_amb_hi",
+    "category": "unknown",
+    "name": "Hardening: Ambulance parking inquiry (Hinglish)",
+    "message": "kya clinic ke paas emergency ambulance ke liye parking available hai?",
+    "expectedDecision": "escalate",
+    "expectedFacts": ["staff", "check"]
+  },
+  {
+    "id": "hardening_amb_kn",
+    "category": "unknown",
+    "name": "Hardening: Ambulance parking inquiry (Kannada Script)",
+    "message": "ತುರ್ತು ಆಂಬ್ಯುಲೆನ್ಸ್‌ಗೆ ಕ್ಲಿನಿಕ್‌ನಲ್ಲಿ ಪಾರ್ಕಿಂಗ್ ಸ್ಥಳ ಲಭ್ಯವಿದೆಯೇ?",
+    "expectedDecision": "escalate",
+    "expectedFacts": ["ಸಿಬ್ಬಂದಿ"]
+  },
+  {
+    "id": "hardening_ins_en",
+    "category": "unknown",
+    "name": "Hardening: Insurance fee refundability (English)",
+    "message": "Is the insurance fee refundable if my claim gets rejected?",
+    "expectedDecision": "escalate",
+    "expectedFacts": ["staff", "check"]
+  },
+  {
+    "id": "hardening_ins_hi",
+    "category": "unknown",
+    "name": "Hardening: Insurance fee refundability (Hinglish)",
+    "message": "kya insurance fee refundable hai agar claim approve na ho?",
+    "expectedDecision": "escalate",
+    "expectedFacts": ["staff", "check"]
+  },
+  {
+    "id": "hardening_ins_kn",
+    "category": "unknown",
+    "name": "Hardening: Insurance fee refundability (Kannada Script)",
+    "message": "ವಿಮೆ ಶುಲ್ಕ ಮರುಪಾವತಿಸಲ್ಪಡುತ್ತದೆಯೇ (insurance fee refundable ideya)?",
+    "expectedDecision": "escalate",
+    "expectedFacts": ["ಸಿಬ್ಬಂದಿ"]
+  },
+  {
+    "id": "hardening_pharm_en",
+    "category": "unknown",
+    "name": "Hardening: Pharmacy next door opening time (English)",
+    "message": "What time does the pharmacy medical store next door open in the morning?",
+    "expectedDecision": "escalate",
+    "expectedFacts": ["staff", "check"]
+  },
+  {
+    "id": "hardening_pharm_hi",
+    "category": "unknown",
+    "name": "Hardening: Pharmacy next door opening time (Hinglish)",
+    "message": "clinic ke bagal wali pharmacy medical store kitne baje khulti hai?",
+    "expectedDecision": "escalate",
+    "expectedFacts": ["staff", "check"]
+  },
+  {
+    "id": "hardening_pharm_kn",
+    "category": "unknown",
+    "name": "Hardening: Pharmacy next door opening time (Kannada Script)",
+    "message": "ಕ್ಲಿನಿಕ್ ಪಕ್ಕದಲ್ಲಿರುವ ಫಾರ್ಮಸಿ (pharmacy next door) ಯಾವ ಸಮಯಕ್ಕೆ ತೆರೆಯುತ್ತದೆ?",
+    "expectedDecision": "escalate",
+    "expectedFacts": ["ಸಿಬ್ಬಂದಿ"]
+  },
+  {
+    "id": "hardening_child_fee_en",
+    "category": "faq_en",
+    "name": "Hardening: Consultation fee for a child (English)",
+    "message": "What is the consultation fee for a child at the clinic?",
+    "expectedDecision": "answer",
+    "expectedFacts": ["600", "paediatric"]
+  },
+  {
+    "id": "hardening_child_fee_hi",
+    "category": "faq_multilingual",
+    "name": "Hardening: Child consultation fee (Hinglish)",
+    "message": "bachhe ke consultation ki fee kitni hai?",
+    "expectedDecision": "answer",
+    "expectedFacts": ["600", "paediatric"]
+  },
+  {
+    "id": "hardening_child_fee_kn",
+    "category": "faq_multilingual",
+    "name": "Hardening: Child consultation fee (Kannada Script)",
+    "message": "ಮಕ್ಕಳ ತಜ್ಞರ ಸಮಾಲೋಚನೆ ಶುಲ್ಕ ಎಷ್ಟು (child consultation fee)?",
+    "expectedDecision": "answer",
+    "expectedFacts": ["600"]
   }
 ]

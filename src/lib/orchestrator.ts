@@ -105,36 +105,21 @@ function matchHighConfidenceFaq(
 ): { matched: boolean; reply: string; kbRef: string } | null {
   const clean = text.toLowerCase().trim();
 
-  // Guard: complex, medical, insurance, multi-intent, booking, or complaint keywords must fall through to LLM or existing handlers
-  if (
-    clean.includes('emergency') ||
-    clean.includes('dr ') ||
-    clean.includes('doctor') ||
-    clean.includes('specialize') ||
-    clean.includes('specialis') ||
-    clean.includes('symptom') ||
-    clean.includes('medic') ||
-    clean.includes('fever') ||
-    clean.includes('pain') ||
-    clean.includes('cancel') ||
-    clean.includes('book') ||
-    clean.includes('appointment') ||
-    clean.includes('mother') ||
-    clean.includes('father') ||
-    clean.includes('family') ||
-    clean.includes('insurance') ||
-    clean.includes('mediclaim') ||
-    clean.includes('blood test') ||
-    clean.includes('lab') ||
-    clean.includes('mri') ||
-    clean.includes('ct scan') ||
-    clean.includes('x-ray') ||
-    clean.includes('ultrasound') ||
-    clean.includes('nearby') ||
-    clean.includes('cost of') ||
-    clean.includes('discount') ||
-    clean.includes('negotiat')
-  ) {
+  // Guard against keyword hijacking: ungrounded, medical, multi-intent, booking, or out-of-scope topics must NOT match generic FAQs
+  const ungroundedOrRestrictedKeywords = [
+    'emergency', 'dr ', 'doctor', 'specialize', 'specialis',
+    'symptom', 'medic', 'fever', 'pain', 'cancel', 'book', 'appointment',
+    'mother', 'father', 'family', 'insurance', 'mediclaim', 'refund', 'refundable',
+    'vapas', 'hinde', 'blood test', 'lab', 'mri', 'ct scan', 'x-ray', 'xray',
+    'ultrasound', 'sonography', 'ambulance', 'pharmacy', 'chemist', 'medical store',
+    'next door', 'pakka', 'pass wali', 'hathira', 'nearby', 'cost of', 'discount',
+    'negotiat', 'bargain', 'cashback', 'ayurveda', 'homeopathy', 'dialysis', 'icu',
+    'ventilator', 'surgery', 'operation',
+    'ಆಂಬ್ಯುಲೆನ್ಸ್', 'ಫಾರ್ಮಸಿ', 'ವಿಮೆ', 'ಮರುಪಾವತಿ', 'ಎಂಆರ್‌ಐ', 'ಸಿಟಿ',
+    'एंबुलेंस', 'फार्मेसी', 'बीमा', 'वापसी'
+  ];
+
+  if (ungroundedOrRestrictedKeywords.some((kw) => clean.includes(kw))) {
     return null;
   }
 
@@ -208,11 +193,32 @@ function matchHighConfidenceFaq(
     return { matched: true, reply, kbRef: 'faq_parking' };
   }
 
-  // 4. Consultation Fees (Standard inquiry)
+  // 4. Consultation Fees (Standard inquiry & Child consultation fee)
   const isFees =
-    /\b(consultation fee|consultation charges|fee structure|fees kitni|kitna charge|shulka eshtu)\b/i.test(clean);
+    /\b(consultation fee|consultation charges|fee structure|fees kitni|kitna charge|shulka eshtu|fee for|charges for|fees for|consultation fee for)\b/i.test(clean) ||
+    clean.includes('consultation fee') ||
+    clean.includes('consultation charges');
 
   if (isFees) {
+    const isChildFee =
+      /\b(child|children|pediatric|paediatric|kid|baby|bachhe|bachha|makkala|maguvina)\b/i.test(clean);
+
+    if (isChildFee) {
+      let reply = '';
+      if (dialect === 'hi') {
+        reply = `डॉ. अरविंद कुमार द्वारा बाल रोग विशेषज्ञ (बच्चों के डॉक्टर) परामर्श शुल्क ₹600 है।`;
+      } else if (dialect === 'hi_latin') {
+        reply = `Dr. Arvind Kumar ke dwara bachhon ke Paediatric consultation ki fee ₹600 hai.`;
+      } else if (dialect === 'kn') {
+        reply = `ಡಾ. ಅರವಿಂದ್ ಕುಮಾರ್ ಅವರ ಮಕ್ಕಳ (Paediatric) ಸಮಾಲೋಚನೆ ಶುಲ್ಕ ₹600.`;
+      } else if (dialect === 'kn_latin') {
+        reply = `Dr. Arvind Kumar avara makkala (Paediatric) consultation fee ₹600 ide.`;
+      } else {
+        reply = `Paediatric (child specialist) consultation by Dr. Arvind Kumar is ₹600.`;
+      }
+      return { matched: true, reply, kbRef: 'srv_paed_consult' };
+    }
+
     let reply = '';
     if (dialect === 'hi') {
       reply = `जनरल फिजिशियन परामर्श ₹500 है, बाल रोग विशेषज्ञ (Paediatric) परामर्श ₹600 है, बेसिक स्वास्थ्य जांच ₹350 और टीकाकरण ₹250 है।`;
@@ -959,9 +965,22 @@ Current Local Date & Time: ${now.dateStr} ${now.timeStr} (Timezone: Asia/Kolkata
 Customer Language Detected: ${langDetection.language} (Dialect: ${dialect}, Script: ${langDetection.script}).
 
 STRICT RULES:
-1. ONLY answer questions using the clinic knowledge base below. NEVER invent prices, hours, doctor names, or facts.
-2. MEDICAL SAFETY: NEVER provide medical advice, diagnosis, medicine recommendations, or dosages. If asked about medication or medical treatment, set decision="escalate" immediately.
-3. If an inquiry cannot be answered from the knowledge base, set decision="escalate" and confidence=0.4.
+1. GROUNDED KNOWLEDGE BASE ONLY:
+   You may ONLY answer with positive facts that are explicitly documented in the CLINIC KNOWLEDGE BASE below.
+   NEVER answer from general knowledge, outside assumptions, or unverified claims.
+2. MEDICAL SAFETY:
+   NEVER provide medical advice, diagnosis, medicine recommendations, or dosages. If asked about medication, treatment, or acute symptoms, set decision="escalate" immediately.
+3. UNGROUNDED / UNCOVERED CLINIC INQUIRIES:
+   If the customer asks about any facility, equipment, machine, scan (e.g. MRI, CT scan, ultrasound / sonography, X-ray), specialist, service, department, pharmacy, ambulance, insurance refund, or policy that is NOT explicitly confirmed in the knowledge base below:
+   - You MUST NOT guess or assume the clinic does not have it!
+   - You MUST NOT say "We do not offer X" or "We do not have X" or "I'm sorry, City Health Clinic does not have X" on your own!
+   - You MUST output:
+     "intent": "unknown",
+     "decision": "escalate",
+     "confidence": 0.3,
+     "reply_text": "Thank you for reaching out to City Health Clinic. I will check this with our clinic staff and have someone assist you shortly with accurate details.",
+     "kb_refs": []
+   - This records the question in the clinic owner's Unanswered Questions list so staff can review it.
 4. LANGUAGE & SCRIPT: Reply in the EXACT language and script the customer used:
    - If Hindi Devanagari script was used, reply in Hindi Devanagari script.
    - If Kannada script was used, reply in Kannada script.
@@ -1050,14 +1069,45 @@ Never Answer Rules: ${JSON.stringify(kbData.neverAnswer)}`;
         llmResult.intent = 'unknown';
         llmResult.decision = 'escalate';
         llmResult.confidence = 0.3;
-        llmResult.reply_text = getLocalizedTemplate('safe_fallback', dialect);
+        llmResult.reply_text = getLocalizedTemplate('unanswered_holding', dialect);
       }
     } else {
       llmResult.intent = 'unknown';
       llmResult.decision = 'escalate';
       llmResult.confidence = 0.3;
-      llmResult.reply_text = getLocalizedTemplate('safe_fallback', dialect);
+      llmResult.reply_text = getLocalizedTemplate('unanswered_holding', dialect);
     }
+  }
+
+  // Programmatic Grounding Guard:
+  // Catch ungrounded queries (MRI, CT scan, Ultrasound, Ambulance, Pharmacy, etc.) not documented in this version of the KB,
+  // or LLM attempts to decline facilities without KB grounding:
+  const knownKbText = JSON.stringify(kbData).toLowerCase();
+  const queryLower = userText.toLowerCase();
+  const ungroundedKeywords = [
+    'mri', 'ct scan', 'ultrasound', 'sonography', 'x-ray', 'xray',
+    'ambulance', 'pharmacy', 'chemist', 'medical store', 'dialysis', 'icu', 'ventilator',
+    'operation theatre', 'surgery', 'dentist', 'dental', 'ayurveda', 'homeopathy',
+    'insurance fee', 'refundable', 'insurance', 'refund',
+    'ಆಂಬ್ಯುಲೆನ್ಸ್', 'ಫಾರ್ಮಸಿ', 'ಮೆಡಿಕಲ್', 'ವಿಮೆ', 'ಮರುಪಾವತಿ', 'ಎಂಆರ್‌ಐ', 'ಸಿಟಿ',
+    'एंबुलेंस', 'फार्मेसी', 'बीमा', 'रिफंड'
+  ];
+
+  const asksUngroundedFacility = ungroundedKeywords.some(
+    (kw) => queryLower.includes(kw) && !knownKbText.includes(kw)
+  );
+
+  const llmDeclaresAbsence =
+    /\b(does not offer|do not offer|does not have|do not have|not available at|does not provide|do not provide|cannot provide)\b/i.test(
+      llmResult.reply_text
+    );
+
+  // If the query asks about a facility absent from KB, or the LLM attempts to decline a service that is ungrounded
+  if (asksUngroundedFacility || (llmDeclaresAbsence && !knownKbText.includes('tie-up') && llmResult.kb_refs.length === 0)) {
+    llmResult.intent = 'unknown';
+    llmResult.decision = 'escalate';
+    llmResult.confidence = 0.3;
+    llmResult.reply_text = getLocalizedTemplate('unanswered_holding', dialect);
   }
 
   // Force escalation if confidence is low, or if decision is escalate, or if intent is complaint / sensitive / unknown
@@ -1066,13 +1116,17 @@ Never Answer Rules: ${JSON.stringify(kbData.neverAnswer)}`;
     llmResult.confidence < 0.6 ||
     llmResult.intent === 'complaint' ||
     llmResult.intent === 'sensitive_or_out_of_scope' ||
-    llmResult.intent === 'unknown';
+    llmResult.intent === 'unknown' ||
+    asksUngroundedFacility;
 
   if (shouldEscalate) {
+    if (llmResult.intent === 'unknown' || asksUngroundedFacility || llmResult.confidence < 0.6) {
+      llmResult.reply_text = getLocalizedTemplate('unanswered_holding', dialect);
+    }
     await db.createEscalation({
       conversation_id: convId,
       reason:
-        llmResult.intent === 'unknown'
+        llmResult.intent === 'unknown' || asksUngroundedFacility
           ? 'Question not covered in knowledge base'
           : `Escalated with intent: ${llmResult.intent} (confidence ${llmResult.confidence})`,
       ai_summary: `Customer message: "${userText}"`,

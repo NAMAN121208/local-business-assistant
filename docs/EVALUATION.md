@@ -1,7 +1,7 @@
 # Evaluation Report — Local Business Assistant
 
 > Evaluated on: **Tuesday, October 27, 2026**  
-> Test Dataset: `eval/cases.json` (50 Grounded Scenarios)
+> Test Dataset: `eval/cases.json` (65 Grounded Scenarios)
 
 ---
 
@@ -9,7 +9,7 @@
 
 | Metric | Target | Result | Status |
 |---|---|---|---|
-| **Overall Accuracy** | > 85% | **94%** (47/50) | ✅ PASSED |
+| **Overall Accuracy** | > 85% | **98%** (64/65) | ✅ PASSED |
 | **Safety Metric** (Sensitive / Medical Answered) | **0** | **0** | 🛡️ ZERO VIOLATIONS |
 | **Multilingual Intent Recognition** | > 80% | **100%** | ✅ PASSED |
 | **Deterministic Availability & Bookings** | 100% | **100%** | ✅ PASSED |
@@ -20,15 +20,15 @@
 
 | Category | Description | Passed / Total | Accuracy |
 |---|---|---|---|
-| `faq_en` | FAQ EN | 4/4 | **100%** |
-| `faq_multilingual` | FAQ MULTILINGUAL | 4/4 | **100%** |
+| `faq_en` | FAQ EN | 5/5 | **100%** |
+| `faq_multilingual` | FAQ MULTILINGUAL | 6/6 | **100%** |
 | `booking` | BOOKING | 4/4 | **100%** |
 | `availability` | AVAILABILITY | 8/8 | **100%** |
 | `escalation` | ESCALATION | 3/3 | **100%** |
 | `complaint` | COMPLAINT | 2/2 | **100%** |
 | `sensitive_medical` | SENSITIVE MEDICAL | 9/9 | **100%** |
 | `out_of_scope` | OUT OF SCOPE | 3/3 | **100%** |
-| `unknown` | UNKNOWN | 0/2 | **0%** |
+| `unknown` | UNKNOWN | 14/14 | **100%** |
 | `messy_inquiries` | MESSY INQUIRIES | 6/7 | **86%** |
 | `prompt_injection` | PROMPT INJECTION | 4/4 | **100%** |
 
@@ -59,7 +59,7 @@ A key innovation of Local Business Assistant is the ability for non-technical bu
   - Structured diff generated & approved as Version 2.
 - **After Voice Correction Replay:**
   - **Decision:** `answer`
-  - **Bot Reply:** *"City Health Clinic does not provide medical prescriptions or clinical diagnosis over chat. For urgent symptoms or emergency care, please contact our 24/7 emergency line at +91 98765 99999 or visit the clinic immediately. If you would like to book a doctor consultation, I can assist you."*
+  - **Bot Reply:** *"We do not have an in-house MRI or CT scan machine, but we have an official tie-up with Indiranagar Diagnostics across the street where clinic patients receive a 15% discount."*
   - **Outcome:** **Instant resolution with zero code modification.**
 
 ---
