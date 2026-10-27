@@ -11,9 +11,12 @@ export async function GET() {
     process.env.GEMINI_API_KEY !== 'your_gemini_api_key_here'
   );
 
-  const grokConfigured = Boolean(
-    process.env.XAI_API_KEY &&
-    process.env.XAI_API_KEY !== 'your_xai_grok_api_key_here'
+  const backupKey = process.env.GROQ_API_KEY || process.env.XAI_API_KEY;
+  const isGroqBackup = backupKey?.startsWith('gsk_') || Boolean(process.env.GROQ_API_KEY);
+  const backupConfigured = Boolean(
+    backupKey &&
+    backupKey !== 'your_xai_grok_api_key_here' &&
+    backupKey !== 'your_groq_api_key_here'
   );
 
   const supabaseConfigured = Boolean(
@@ -72,9 +75,12 @@ export async function GET() {
     llm: {
       primaryProvider: process.env.PRIMARY_PROVIDER || 'gemini',
       geminiConfigured,
-      geminiModel: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
-      grokConfigured,
-      grokModel: process.env.XAI_MODEL || 'grok-2-latest',
+      geminiModel: process.env.GEMINI_MODEL || 'gemini-flash-lite-latest',
+      backupConfigured,
+      backupProvider: isGroqBackup ? 'groq' : 'grok',
+      backupModel: isGroqBackup
+        ? process.env.GROQ_MODEL || 'qwen/qwen3.8-27b'
+        : process.env.XAI_MODEL || 'grok-2-latest',
       circuitBreakerEnabled: true,
       failoverEnabled: true,
     },

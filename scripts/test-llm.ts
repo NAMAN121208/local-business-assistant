@@ -132,50 +132,60 @@ async function testGemini(): Promise<boolean> {
 }
 
 async function testGrok(): Promise<boolean> {
-  const apiKey = process.env.XAI_API_KEY;
-  console.log('\n--- 2. Testing Grok / xAI Provider & Models Discovery ---');
-  if (!apiKey || apiKey === 'your_xai_grok_api_key_here') {
-    console.log('⚠️ XAI_API_KEY is not set in environment or .env.local.');
-    console.log('  To test live Grok calls, add XAI_API_KEY=<your-key> to .env.local');
+  const apiKey = process.env.GROQ_API_KEY || process.env.XAI_API_KEY;
+  const isGroq = apiKey?.startsWith('gsk_') || Boolean(process.env.GROQ_API_KEY);
+  const providerLabel = isGroq ? 'Groq (LPU Inference)' : 'Grok (xAI)';
+  console.log(`\n--- 2. Testing Backup Provider (${providerLabel}) & Models Discovery ---`);
+  if (!apiKey || apiKey === 'your_xai_grok_api_key_here' || apiKey === 'your_groq_api_key_here') {
+    console.log('⚠️ GROQ_API_KEY or XAI_API_KEY is not set in environment or .env.local.');
+    console.log('  To test live backup calls, add GROQ_API_KEY=<your-key> to .env.local');
     return false;
   }
 
-  const model = process.env.XAI_MODEL || 'grok-2-latest';
+  const model = isGroq
+    ? process.env.GROQ_MODEL || 'qwen/qwen3.8-27b'
+    : process.env.XAI_MODEL || 'grok-2-latest';
 
-  // Step 1: Call xAI models endpoint
-  console.log('  [Models Endpoint]: Querying xAI /v1/models endpoint...');
+  const modelsUrl = isGroq
+    ? 'https://api.groq.com/openai/v1/models'
+    : 'https://api.x.ai/v1/models';
+
+  // Step 1: Call models endpoint
+  console.log(`  [Models Endpoint]: Querying ${providerLabel} models endpoint...`);
   try {
-    const listRes = await fetch('https://api.x.ai/v1/models', {
+    const listRes = await fetch(modelsUrl, {
       method: 'GET',
       headers: { Authorization: `Bearer ${apiKey}` },
     });
     if (!listRes.ok) {
       const err = await listRes.text();
-      console.error(`❌ Failed to query xAI models endpoint (${listRes.status}): ${err}`);
+      console.error(`❌ Failed to query ${providerLabel} models endpoint (${listRes.status}): ${err}`);
       return false;
     }
     const listData = await listRes.json();
     const availableModels = (listData.data || []).map((m: any) => m.id);
-    console.log(`  [Models Endpoint]: Account has models: ${availableModels.join(', ')}`);
+    console.log(`  [Models Endpoint]: Account has models: ${availableModels.slice(0, 8).join(', ')}...`);
 
     const modelExists = availableModels.some((m: string) => m === model);
     if (!modelExists) {
       console.error(
-        `❌ ERROR: Configured model "${model}" was NOT found in your xAI account!`
+        `❌ ERROR: Configured model "${model}" was NOT found in your ${providerLabel} account!`
       );
       console.error(
-        `   Please change XAI_MODEL in .env.local to one of: ${availableModels.join(', ')}`
+        `   Please change model in .env.local to one of: ${availableModels.join(', ')}`
       );
       return false;
     }
-    console.log(`  [Model Verified]: "${model}" exists and is accessible in your xAI account.`);
+    console.log(`  [Model Verified]: "${model}" exists and is accessible in your ${providerLabel} account.`);
   } catch (err: any) {
-    console.error(`❌ Network error contacting xAI models list:`, err.message);
+    console.error(`❌ Network error contacting ${providerLabel} models list:`, err.message);
     return false;
   }
 
   // Step 2: Execute live generation call
-  const url = 'https://api.x.ai/v1/chat/completions';
+  const url = isGroq
+    ? 'https://api.groq.com/openai/v1/chat/completions'
+    : 'https://api.x.ai/v1/chat/completions';
   const start = Date.now();
 
   try {
@@ -199,17 +209,17 @@ async function testGrok(): Promise<boolean> {
     const duration = Date.now() - start;
     if (!res.ok) {
       const errText = await res.text();
-      console.error(`❌ Grok API call rejected (${res.status}) [Latency: ${duration}ms]: ${errText}`);
+      console.error(`❌ ${providerLabel} API call rejected (${res.status}) [Latency: ${duration}ms]: ${errText}`);
       return false;
     }
 
     const data = await res.json();
     const content = data.choices?.[0]?.message?.content;
-    console.log(`✅ [Provider: grok] [Model: ${model}] [Latency: ${duration}ms] Response verified!`);
+    console.log(`✅ [Provider: ${isGroq ? 'groq' : 'grok'}] [Model: ${model}] [Latency: ${duration}ms] Response verified!`);
     console.log(`   Sample Reply: ${content?.slice(0, 120)}...`);
     return true;
   } catch (err: any) {
-    console.error(`❌ Grok network exception [Latency: ${Date.now() - start}ms]:`, err.message);
+    console.error(`❌ ${providerLabel} network exception [Latency: ${Date.now() - start}ms]:`, err.message);
     return false;
   }
 }

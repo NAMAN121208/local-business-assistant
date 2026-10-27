@@ -8,14 +8,20 @@ export class GrokProvider implements LLMProvider {
   private baseUrl: string;
 
   constructor(apiKey?: string, model?: string) {
-    this.apiKey = apiKey || process.env.XAI_API_KEY || '';
-    this.model = model || process.env.XAI_MODEL || 'grok-2-latest';
-    this.baseUrl = 'https://api.x.ai/v1/chat/completions';
+    this.apiKey = apiKey || process.env.GROQ_API_KEY || process.env.XAI_API_KEY || '';
+    const isGroq = this.apiKey.startsWith('gsk_') || !!process.env.GROQ_API_KEY;
+    if (isGroq) {
+      this.baseUrl = 'https://api.groq.com/openai/v1/chat/completions';
+      this.model = model || process.env.GROQ_MODEL || 'qwen/qwen3.8-27b';
+    } else {
+      this.baseUrl = 'https://api.x.ai/v1/chat/completions';
+      this.model = model || process.env.XAI_MODEL || 'grok-2-latest';
+    }
   }
 
   async generate(request: LLMRequest): Promise<LLMOutput> {
     if (!this.apiKey) {
-      throw new Error('XAI_API_KEY is not set');
+      throw new Error('GROQ_API_KEY / XAI_API_KEY is not set');
     }
 
     const messages = [
