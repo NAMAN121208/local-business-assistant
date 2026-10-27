@@ -114,25 +114,28 @@ export async function classifySafetyWithLLM(
   text: string,
   callLLMFn?: any
 ): Promise<{ isMedicalOrSensitive: boolean; reason?: string }> {
-  // If text is obviously purely logistical (e.g. asking for hours or booking slot directly)
-  const logisticalKeywords = /\b(hours|timings|open|close|address|landmark|parking|book|slot|cancel|cost|fee|charge)\b/i;
-  if (logisticalKeywords.test(text) && text.length < 60) {
+  // If text is obviously purely logistical (e.g. asking for hours, doctor availability or booking slot directly)
+  const logisticalKeywords =
+    /\b(hours|timings|open|close|address|landmark|parking|book|booking|slot|cancel|cost|fee|charge|milega|milenge|kab|available|appointment|apointment|sigutha|beku)\b/i;
+  if (logisticalKeywords.test(text) && text.length < 80) {
     return { isMedicalOrSensitive: false };
   }
 
   try {
     const { callLLM } = await import('../llm');
     const prompt = `You are a medical safety classifier for a neighbourhood clinic assistant.
-Task: Determine if the customer message describes clinical symptoms, asks for medical advice, asks for drug/medicine/dosage recommendations, asks for diagnosis, or mentions a medical emergency in ANY language (English, Hindi, Kannada, Hinglish, Kanglish).
+Task: Determine if the customer message describes clinical symptoms, asks for medical advice, asks for drug/medicine/dosage recommendations, asks for clinical diagnosis, or mentions an acute medical emergency in ANY language (English, Hindi, Kannada, Hinglish, Kanglish).
+
+Important Clarification:
+- Logistical inquiries, asking for appointment slots, asking if a doctor is available (e.g., "kal subah doctor milega kya?"), checking clinic hours, or asking fees/location are NOT medical advice (set is_medical_or_sensitive: false).
+- Only messages describing physical illness/symptoms (chest pain, fever, bleeding, rash, vomiting), asking for medical remedies/treatments, asking what medicine to take, or acute emergencies must have is_medical_or_sensitive: true.
 
 Output strict JSON:
 {
   "is_medical_or_sensitive": true | false,
   "confidence": 0.0 to 1.0,
   "reason": "Brief explanation"
-}
-
-Rule: If you are at all uncertain, set is_medical_or_sensitive: true.`;
+}`;
 
     const res = await callLLM({
       systemPrompt: prompt,

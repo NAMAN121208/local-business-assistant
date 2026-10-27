@@ -40,6 +40,15 @@ function bufferToHex(buf: ArrayBuffer): string {
   return hex;
 }
 
+function hexToBuffer(hex: string): Uint8Array {
+  if (hex.length % 2 !== 0) return new Uint8Array();
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) {
+    bytes[i / 2] = parseInt(hex.slice(i, i + 2), 16);
+  }
+  return bytes;
+}
+
 export async function createSessionToken(): Promise<string> {
   const secret = getSessionSecret();
   if (!secret) {
@@ -68,11 +77,14 @@ export async function verifySessionToken(token?: string | null): Promise<boolean
     return false;
   }
 
-  const key = await getHmacKey(secret);
-  const expectedSigBuffer = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(timestampStr));
-  const expectedSignatureHex = bufferToHex(expectedSigBuffer);
-
-  return providedSignatureHex === expectedSignatureHex;
+  try {
+    const key = await getHmacKey(secret);
+    const sigBytes = hexToBuffer(providedSignatureHex);
+    const dataBytes = new TextEncoder().encode(timestampStr);
+    return await crypto.subtle.verify('HMAC', key, sigBytes, dataBytes);
+  } catch {
+    return false;
+  }
 }
 
 export async function setSessionCookie(res: NextResponse): Promise<void> {

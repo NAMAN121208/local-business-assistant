@@ -124,14 +124,43 @@ async function runOwnerTests() {
       throw new Error(`Expected HTTP 200 for correct password, got: ${resCorrect.status}`);
     }
 
+    // Brute force test: 5 failed attempts -> 429 lockout
+    const attackerIp = '198.51.100.42';
+    for (let i = 0; i < 4; i++) {
+      const failReq = new NextRequest('http://localhost:3000/api/owner/login', {
+        method: 'POST',
+        headers: { 'x-forwarded-for': attackerIp },
+        body: JSON.stringify({ password: 'bad_guess' }),
+      });
+      const failRes = await loginPost(failReq);
+      if (failRes.status !== 401) throw new Error(`Expected 401 on attempt ${i + 1}, got ${failRes.status}`);
+    }
+    // 5th failed attempt -> 429
+    const lockReq = new NextRequest('http://localhost:3000/api/owner/login', {
+      method: 'POST',
+      headers: { 'x-forwarded-for': attackerIp },
+      body: JSON.stringify({ password: 'bad_guess' }),
+    });
+    const lockRes = await loginPost(lockReq);
+    if (lockRes.status !== 429) throw new Error(`Expected 429 on 5th failed attempt, got ${lockRes.status}`);
+
+    // 6th attempt even with correct password is locked out
+    const lockedOutReq = new NextRequest('http://localhost:3000/api/owner/login', {
+      method: 'POST',
+      headers: { 'x-forwarded-for': attackerIp },
+      body: JSON.stringify({ password: 'test_owner_secret_999' }),
+    });
+    const lockedOutRes = await loginPost(lockedOutReq);
+    if (lockedOutRes.status !== 429) throw new Error(`Expected 429 lockout even with right password, got ${lockedOutRes.status}`);
+
     const token = await createSessionToken();
     const isValid = await verifySessionToken(token);
     if (!isValid) throw new Error('HMAC-SHA256 signed session token failed verification!');
-    console.log('  [Auth]: Verified 503 on unset env, 401 on wrong password, 200 on correct password, and HMAC-SHA256 cookie signing.');
+    console.log('  [Auth]: Verified 503 on unset env, 401 on wrong password, 429 brute-force lockout on 5th failure, 200 on correct password, and constant-time HMAC cookie verification.');
   });
 
   // 2. HTTP-Level Route Protection (Middleware assertions for every owner endpoint)
-  await testCase('HTTP Route Protection: all /owner and /api/owner routes reject unauthenticated requests', async () => {
+  await testCase('HTTP Route Protection: all /owner and /api/owner routes reject unauthenticated, tampered & expired requests', async () => {
     const ownerApiRoutes = [
       '/api/owner/stats',
       '/api/owner/conversations',
@@ -147,6 +176,8 @@ async function runOwnerTests() {
       '/api/owner/kb/generate',
       '/api/owner/kb/replay',
       '/api/owner/kb/reset-demo',
+      '/api/owner/demo-data',
+      '/api/owner/summary',
       '/api/owner/logout',
     ];
 
@@ -157,20 +188,42 @@ async function runOwnerTests() {
       '/owner/bookings',
       '/owner/setup',
       '/owner/unanswered',
+      '/owner/summary',
     ];
 
     const validToken = await createSessionToken();
+    const tamperedToken = `${validToken}_tampered`;
+    const expiredTimestamp = Date.now() - 8 * 24 * 60 * 60 * 1000;
+    const expiredToken = `${expiredTimestamp}.bad_signature_hex`;
 
-    // Test API Routes: without cookie -> 401; with cookie -> not 401
+    // Test API Routes: unauthenticated, tampered, expired -> all 401; authenticated -> not 401
     for (const route of ownerApiRoutes) {
-      // Unauthenticated
+      // 1. Unauthenticated (no cookie)
       const unauthReq = new NextRequest(`http://localhost:3000${route}`);
       const unauthRes = await middleware(unauthReq);
       if (unauthRes.status !== 401) {
         throw new Error(`Route ${route} returned status ${unauthRes.status} instead of 401 when unauthenticated!`);
       }
 
-      // Authenticated
+      // 2. Tampered cookie
+      const tamperedReq = new NextRequest(`http://localhost:3000${route}`, {
+        headers: { Cookie: `${COOKIE_NAME}=${tamperedToken}` },
+      });
+      const tamperedRes = await middleware(tamperedReq);
+      if (tamperedRes.status !== 401) {
+        throw new Error(`Route ${route} returned status ${tamperedRes.status} instead of 401 with tampered cookie!`);
+      }
+
+      // 3. Expired cookie
+      const expiredReq = new NextRequest(`http://localhost:3000${route}`, {
+        headers: { Cookie: `${COOKIE_NAME}=${expiredToken}` },
+      });
+      const expiredRes = await middleware(expiredReq);
+      if (expiredRes.status !== 401) {
+        throw new Error(`Route ${route} returned status ${expiredRes.status} instead of 401 with expired cookie!`);
+      }
+
+      // 4. Authenticated
       const authReq = new NextRequest(`http://localhost:3000${route}`, {
         headers: {
           Cookie: `${COOKIE_NAME}=${validToken}`,
@@ -182,12 +235,34 @@ async function runOwnerTests() {
       }
     }
 
-    // Test Pages: without cookie -> redirect (307/302); with cookie -> allow
+    // CSRF Origin verification on state-changing API routes
+    const csrfReq = new NextRequest('http://localhost:3000/api/owner/kb/approve', {
+      method: 'POST',
+      headers: {
+        Cookie: `${COOKIE_NAME}=${validToken}`,
+        Origin: 'https://attacker-malicious-site.com',
+        Host: 'localhost:3000',
+      },
+    });
+    const csrfRes = await middleware(csrfReq);
+    if (csrfRes.status !== 403) {
+      throw new Error(`Expected CSRF 403 Forbidden on mismatched origin, got ${csrfRes.status}`);
+    }
+
+    // Test Pages: without cookie, tampered, expired -> redirect (307/302); with cookie -> allow
     for (const page of ownerPages) {
-      const unauthReq = new NextRequest(`http://localhost:3000${page}`);
-      const unauthRes = await middleware(unauthReq);
-      if (unauthRes.status !== 307 && unauthRes.status !== 302) {
-        throw new Error(`Page ${page} returned status ${unauthRes.status} instead of redirect to login!`);
+      for (const [cookieVal, desc] of [
+        ['', 'no cookie'],
+        [tamperedToken, 'tampered cookie'],
+        [expiredToken, 'expired cookie'],
+      ]) {
+        const req = new NextRequest(`http://localhost:3000${page}`, {
+          headers: cookieVal ? { Cookie: `${COOKIE_NAME}=${cookieVal}` } : {},
+        });
+        const res = await middleware(req);
+        if (res.status !== 307 && res.status !== 302) {
+          throw new Error(`Page ${page} with ${desc} returned status ${res.status} instead of redirect to login!`);
+        }
       }
     }
 

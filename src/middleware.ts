@@ -31,6 +31,29 @@ export async function middleware(req: NextRequest) {
         { status: 401 }
       );
     }
+
+    // CSRF Protection on state-changing requests
+    const method = req.method.toUpperCase();
+    if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) {
+      const origin = req.headers.get('origin');
+      const host = req.headers.get('host');
+      if (origin && host) {
+        try {
+          const originHost = new URL(origin).host;
+          if (originHost !== host) {
+            return NextResponse.json(
+              { error: 'Forbidden: Cross-site request forgery (CSRF) blocked' },
+              { status: 403 }
+            );
+          }
+        } catch {
+          return NextResponse.json(
+            { error: 'Forbidden: Invalid request origin' },
+            { status: 403 }
+          );
+        }
+      }
+    }
   }
 
   return NextResponse.next();
