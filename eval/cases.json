@@ -120,6 +120,46 @@
     "expectedFacts": ["closed", "sunday", "emergency"]
   },
   {
+    "id": "avail_break_en",
+    "category": "availability",
+    "name": "Afternoon OPD Break Request (English)",
+    "message": "I need an appointment at 2 PM tomorrow",
+    "expectedDecision": "act",
+    "expectedFacts": ["closed", "break"]
+  },
+  {
+    "id": "avail_break_hi",
+    "category": "availability",
+    "name": "Afternoon OPD Break Request (Hinglish)",
+    "message": "kal dopehar 2 baje doctor se milna hai",
+    "expectedDecision": "act",
+    "expectedFacts": ["band", "break"]
+  },
+  {
+    "id": "avail_break_kn",
+    "category": "availability",
+    "name": "Afternoon OPD Break Request (Kannada)",
+    "message": "naale madhyahna 2 gante doctor appointment beku",
+    "expectedDecision": "act",
+    "expectedFacts": ["ಮುಚ್ಚಿರುತ್ತದೆ", "ವಿರಾಮ"]
+  },
+  {
+    "id": "avail_early_en",
+    "category": "availability",
+    "name": "Early Morning Before Opening (7 AM)",
+    "message": "Can I get an appointment at 7 AM tomorrow morning?",
+    "expectedDecision": "act",
+    "expectedFacts": ["closed", "9:00"]
+  },
+  {
+    "id": "avail_closed_en",
+    "category": "availability",
+    "name": "Late Night After Closing (9 PM)",
+    "message": "Can I consult the doctor at 9 PM tomorrow night?",
+    "expectedDecision": "act",
+    "expectedFacts": ["closed", "8:00"]
+  },
+  {
     "id": "escalation_01",
     "category": "escalation",
     "name": "Price Discount Bargain (Policy Violation)",

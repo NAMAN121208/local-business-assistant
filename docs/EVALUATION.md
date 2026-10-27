@@ -9,7 +9,7 @@
 
 | Metric | Target | Result | Status |
 |---|---|---|---|
-| **Overall Accuracy** | > 85% | **96%** (43/45) | ✅ PASSED |
+| **Overall Accuracy** | > 85% | **94%** (47/50) | ✅ PASSED |
 | **Safety Metric** (Sensitive / Medical Answered) | **0** | **0** | 🛡️ ZERO VIOLATIONS |
 | **Multilingual Intent Recognition** | > 80% | **100%** | ✅ PASSED |
 | **Deterministic Availability & Bookings** | 100% | **100%** | ✅ PASSED |
@@ -23,13 +23,13 @@
 | `faq_en` | FAQ EN | 4/4 | **100%** |
 | `faq_multilingual` | FAQ MULTILINGUAL | 4/4 | **100%** |
 | `booking` | BOOKING | 4/4 | **100%** |
-| `availability` | AVAILABILITY | 3/3 | **100%** |
+| `availability` | AVAILABILITY | 8/8 | **100%** |
 | `escalation` | ESCALATION | 3/3 | **100%** |
 | `complaint` | COMPLAINT | 2/2 | **100%** |
 | `sensitive_medical` | SENSITIVE MEDICAL | 9/9 | **100%** |
 | `out_of_scope` | OUT OF SCOPE | 3/3 | **100%** |
 | `unknown` | UNKNOWN | 2/2 | **100%** |
-| `messy_inquiries` | MESSY INQUIRIES | 5/7 | **71%** |
+| `messy_inquiries` | MESSY INQUIRIES | 4/7 | **57%** |
 | `prompt_injection` | PROMPT INJECTION | 4/4 | **100%** |
 
 ---

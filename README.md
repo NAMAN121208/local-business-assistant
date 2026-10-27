@@ -297,6 +297,15 @@ Every environment variable required in production on Vercel is listed below with
 1. **Strictly Non-Clinical:** The assistant is explicitly constrained to administrative and logistical tasks (timings, directions, bookings, doctor schedules). It never provides medical diagnoses, medication recommendations, or drug dosages.
 2. **Emergency Routing:** Emergency requests provide the clinic's 24/7 hotline (`+91 98765 99999`) and recommend visiting casualty immediately.
 3. **Voice Hardware:** In this web implementation, voice dictation leverages the user's system Wispr Flow hotkey dictating into standard HTML text inputs.
+4. **Serverless In-Memory State vs. Database Concurrency Guarantees:**
+   - **Best-Effort In-Memory Controls:** On serverless platforms like Vercel, the IP rate limiter (20 req/min), owner login brute-force lockout (5 failed attempts), LLM provider circuit breaker, and application-level slot lock mutex (`activeSlotLocks`) operate in memory per container instance. When traffic scales across multiple cold/warm serverless workers, these controls operate as best-effort defenses.
+   - **Authoritative Concurrency Protection:** True multi-instance double-booking prevention is enforced authoritatively at the database layer via PostgreSQL partial unique index:
+     ```sql
+     CREATE UNIQUE INDEX idx_unique_confirmed_booking_slot
+     ON bookings (business_id, service, start_time)
+     WHERE (status = 'confirmed');
+     ```
+     This guarantees zero double-bookings even under extreme concurrent bursts across distributed serverless functions. If two requests slip through the in-memory mutex on different instances, PostgreSQL rejects the second insertion with code `23505`, and the orchestrator catches it gracefully and offers the next nearest slots.
 
 ---
 
