@@ -52,6 +52,11 @@ export async function processMessage(params: {
   const conversation = await db.getOrCreateConversation(businessId, customerId, channel, params.conversationId);
   const convId = conversation.id;
 
+  // If conversation was previously resolved, reopen it on new customer message
+  if (conversation.status === 'resolved') {
+    await db.updateConversationStatus(convId, 'open');
+  }
+
   // 3. Save incoming customer message
   await db.createMessage({
     conversation_id: convId,
@@ -60,11 +65,32 @@ export async function processMessage(params: {
     language: 'en',
   });
 
-  // 4. Grounding & Safety pre-check
+  // 4. Check if conversation currently needs human intervention
+  // Do not chatter over the owner if a human review is actively pending
+  if (conversation.status === 'needs_human') {
+    const holdingMsg =
+      'Thank you. Our clinic staff is already reviewing your thread and will reply shortly. For urgent care, please call +91 98765 99999.';
+    await db.createMessage({
+      conversation_id: convId,
+      sender: 'bot',
+      text: holdingMsg,
+      language: 'en',
+      provider: 'needs_human_hold',
+      decision: 'escalate',
+    });
+    return {
+      conversationId: convId,
+      text: holdingMsg,
+      decision: 'escalate',
+      provider: 'needs_human_hold',
+    };
+  }
+
+  // 5. Grounding & Safety pre-check
   const kbData = await retrieveRelevantKnowledge(businessId, userText);
   const now = getClinicNow('Asia/Kolkata');
 
-  // Strict guardrail: Never give medical advice or diagnose
+  // Strict guardrail: Never give medical advice, dosages or diagnose
   if (isNeverAnswerTopic(userText, kbData.neverAnswer)) {
     const holdingReply =
       'City Health Clinic does not provide medical prescriptions or clinical diagnosis over chat. For urgent symptoms or emergency care, please contact our 24/7 emergency line at +91 98765 99999 or visit the clinic immediately. If you would like to book a doctor consultation, I can assist you.';
@@ -80,7 +106,7 @@ export async function processMessage(params: {
 
     await db.updateConversationStatus(convId, 'needs_human');
 
-    const botMsg = await db.createMessage({
+    await db.createMessage({
       conversation_id: convId,
       sender: 'bot',
       text: holdingReply,
@@ -102,17 +128,25 @@ export async function processMessage(params: {
     };
   }
 
-  // 5. Deterministic Booking Detection & Slot Filling
+  // 6. Deterministic Booking Detection & Slot Filling
   const lower = userText.toLowerCase();
   const history = await db.getRecentMessages(convId, 8);
 
-  // Check if user is asking for availability or booking
+  // Check if user is asking for availability or booking in English or Hinglish
   const isBookingQuery =
-    /\b(book|appointment|slot|schedule|consultation|doctor available|timings available)\b/i.test(userText);
+    /\b(book|appointment|slot|schedule|consultation|doctor|available|timings|milega|milenge|dikhana|dikha)\b/i.test(
+      userText
+    );
   const targetDate = parseRelativeDate(userText, 'Asia/Kolkata');
 
   if (isBookingQuery && targetDate) {
-    const timeWindow = lower.includes('morning') ? 'morning' : lower.includes('evening') ? 'evening' : 'any';
+    const timeWindow =
+      lower.includes('morning') || lower.includes('subah')
+        ? 'morning'
+        : lower.includes('evening') || lower.includes('shaam')
+        ? 'evening'
+        : 'any';
+
     const avail = await checkAvailability({
       businessId,
       service: 'General Physician Consultation',
@@ -125,7 +159,9 @@ export async function processMessage(params: {
 
     if (avail.available && avail.slots.length > 0) {
       const slotList = avail.slots.map((s) => s.time).join(', ');
-      replyText = `We have slots available for Dr. Consultation on ${avail.date} (${timeWindow === 'any' ? 'OPD hours' : timeWindow}): ${slotList}. Would you like to confirm one of these slots? Please reply with your preferred time and your name.`;
+      replyText = `We have slots available for Dr. Consultation on ${avail.date} (${
+        timeWindow === 'any' ? 'OPD hours' : timeWindow
+      }): ${slotList}. Would you like to confirm one of these slots? Please reply with your preferred time and your name.`;
       quickReplies = avail.slots.map((s) => `Confirm ${s.time} on ${avail.date}`);
     } else {
       replyText =
@@ -165,13 +201,12 @@ export async function processMessage(params: {
   );
 
   if (confirmMatch && hasPendingBookingContext) {
-    // Find date and time from context or user text
     const lastBotMsg = [...history].reverse().find((h) => h.sender === 'bot' && h.text.includes('slots available'));
     const dateMatch = lastBotMsg?.text.match(/(\d{4}-\d{2}-\d{2})/);
     const bookingDate = dateMatch ? dateMatch[1] : targetDate || now.dateStr;
 
-    // Pick slot time (defaulting to first morning/evening slot mentioned or user requested)
-    const slotTimeMatch = userText.match(/(\d{1,2}:\d{2}\s*(?:am|pm)?)/i) || lastBotMsg?.text.match(/(\d{1,2}:\d{2}\s*(?:am|pm))/i);
+    const slotTimeMatch =
+      userText.match(/(\d{1,2}:\d{2}\s*(?:am|pm)?)/i) || lastBotMsg?.text.match(/(\d{1,2}:\d{2}\s*(?:am|pm))/i);
     const chosenTime = slotTimeMatch ? slotTimeMatch[1] : '10:00 AM';
 
     const booking = await confirmBooking({
@@ -207,7 +242,7 @@ export async function processMessage(params: {
     };
   }
 
-  // 6. LLM Orchestrator Loop (for FAQs, general inquiries, intent grounding, and unknown topics)
+  // 7. LLM Orchestrator Loop (for FAQs, general inquiries, intent grounding, and unknown topics)
   const systemPrompt = `You are the AI Front-Desk Assistant for "City Health Clinic" in Indiranagar, Bengaluru.
 Current Local Date & Time: ${now.dateStr} ${now.timeStr} (Timezone: Asia/Kolkata).
 
@@ -308,9 +343,8 @@ Never Answer Rules: ${JSON.stringify(kbData.neverAnswer)}`;
     decision: shouldEscalate ? 'escalate' : llmResult.decision,
     intent: llmResult.intent,
     provider: llmResult.provider,
-    quickReplies:
-      shouldEscalate
-        ? ['Talk to Staff', 'Emergency Contact', 'Clinic Timings']
-        : ['Book Appointment', 'Clinic Hours', 'Location & Parking'],
+    quickReplies: shouldEscalate
+      ? ['Talk to Staff', 'Emergency Contact', 'Clinic Timings']
+      : ['Book Appointment', 'Clinic Hours', 'Location & Parking'],
   };
 }

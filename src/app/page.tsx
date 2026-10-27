@@ -9,14 +9,13 @@ import {
   ShieldAlert,
   Calendar,
   CheckCircle2,
-  Sparkles,
-  RefreshCw,
-  Info,
+  Stethoscope,
+  UserCheck,
 } from 'lucide-react';
 
 interface ChatMessage {
   id: string;
-  sender: 'customer' | 'bot';
+  sender: 'customer' | 'bot' | 'owner';
   text: string;
   decision?: 'answer' | 'act' | 'escalate';
   intent?: string;
@@ -30,6 +29,7 @@ export default function CustomerChatPage() {
   const [inputText, setInputText] = useState('');
   const [loading, setLoading] = useState(false);
   const [conversationId, setConversationId] = useState<string>('');
+  const [convStatus, setConvStatus] = useState<string>('open');
   const [quickReplies, setQuickReplies] = useState<string[]>([
     'What are your clinic timings?',
     'Book appointment tomorrow evening',
@@ -59,6 +59,51 @@ export default function CustomerChatPage() {
       },
     ]);
   }, []);
+
+  // Poll for owner replies every 4 seconds
+  useEffect(() => {
+    if (!conversationId) return;
+
+    const pollMessages = async () => {
+      try {
+        const res = await fetch(`/api/chat?conversationId=${conversationId}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.status) setConvStatus(data.status);
+
+          if (data.messages && Array.isArray(data.messages)) {
+            setMessages((prev) => {
+              const existingIds = new Set(prev.map((m) => m.id));
+              const newMsgs = data.messages
+                .filter((m: any) => !existingIds.has(m.id))
+                .map((m: any) => ({
+                  id: m.id,
+                  sender: m.sender,
+                  text: m.text,
+                  decision: m.decision,
+                  intent: m.intent,
+                  provider: m.provider,
+                  timestamp: new Date(m.created_at).toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  }),
+                }));
+
+              if (newMsgs.length > 0) {
+                return [...prev, ...newMsgs];
+              }
+              return prev;
+            });
+          }
+        }
+      } catch (e) {
+        // quiet poll fail
+      }
+    };
+
+    const interval = setInterval(pollMessages, 4000);
+    return () => clearInterval(interval);
+  }, [conversationId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -140,14 +185,16 @@ export default function CustomerChatPage() {
               </p>
             </div>
           </div>
-          <a
-            href="tel:+919876599999"
-            className="flex items-center gap-1 bg-red-500/90 hover:bg-red-600 text-white text-xs px-2.5 py-1.5 rounded-full font-medium transition shadow-sm"
-            title="Emergency Call"
-          >
-            <PhoneCall className="w-3.5 h-3.5" />
-            <span>Emergency</span>
-          </a>
+          <div className="flex items-center gap-2">
+            <a
+              href="tel:+919876599999"
+              className="flex items-center gap-1 bg-red-500/90 hover:bg-red-600 text-white text-xs px-2.5 py-1.5 rounded-full font-medium transition shadow-sm"
+              title="Emergency Call"
+            >
+              <PhoneCall className="w-3.5 h-3.5" />
+              <span>Emergency</span>
+            </a>
+          </div>
         </div>
 
         {/* Quick Clinic Info Pills */}
@@ -161,56 +208,88 @@ export default function CustomerChatPage() {
         </div>
       </header>
 
-      {/* Safety Notice Banner */}
-      <div className="bg-amber-50 border-b border-amber-200 px-3 py-1.5 text-[11px] text-amber-800 flex items-center gap-1.5">
-        <ShieldAlert className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
-        <span>
-          <strong>Clinic Logistics & Appointments Only.</strong> For medical emergencies, call +91 98765 99999.
-        </span>
-      </div>
+      {/* Safety Notice or Human Escalation Banner */}
+      {convStatus === 'needs_human' ? (
+        <div className="bg-amber-100 border-b border-amber-300 px-3 py-2 text-xs text-amber-900 flex items-center gap-2">
+          <UserCheck className="w-4 h-4 text-amber-700 flex-shrink-0 animate-pulse" />
+          <span>
+            <strong>Clinic Staff Alerted:</strong> A member of Dr. Sneha Rao&apos;s team is reviewing your conversation and will reply directly here.
+          </span>
+        </div>
+      ) : (
+        <div className="bg-amber-50 border-b border-amber-200 px-3 py-1.5 text-[11px] text-amber-800 flex items-center gap-1.5">
+          <ShieldAlert className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
+          <span>
+            <strong>Clinic Logistics & Appointments Only.</strong> For medical emergencies, call +91 98765 99999.
+          </span>
+        </div>
+      )}
 
       {/* Chat Messages Scroll Area */}
       <main className="flex-1 overflow-y-auto p-4 space-y-3.5 bg-slate-50/70">
         {messages.map((m) => {
           const isUser = m.sender === 'customer';
+          const isOwner = m.sender === 'owner';
+
           return (
-            <div key={m.id} className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
+            <div
+              key={m.id}
+              className={`flex flex-col ${
+                isUser ? 'items-end' : 'items-start'
+              }`}
+            >
+              {/* Message Bubble */}
               <div
                 className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm shadow-sm whitespace-pre-wrap leading-relaxed ${
                   isUser
                     ? 'bg-teal-600 text-white rounded-br-none'
+                    : isOwner
+                    ? 'bg-emerald-900 text-white border-2 border-emerald-500 rounded-bl-none shadow-md'
                     : 'bg-white text-slate-800 border border-slate-200/90 rounded-bl-none'
                 }`}
               >
+                {isOwner && (
+                  <div className="flex items-center gap-1 text-[11px] font-semibold text-emerald-200 mb-1 pb-1 border-b border-emerald-700/60">
+                    <Stethoscope className="w-3.5 h-3.5" />
+                    <span>Clinic Team (Staff)</span>
+                  </div>
+                )}
                 {m.text}
               </div>
 
-              {/* Bot Meta Badges */}
-              {!isUser && (
-                <div className="flex items-center gap-2 mt-1 px-1 text-[10px] text-slate-400">
-                  <span>{m.timestamp}</span>
-                  {m.decision === 'answer' && (
-                    <span className="text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/60 flex items-center gap-0.5">
-                      <CheckCircle2 className="w-2.5 h-2.5" /> Answered
-                    </span>
-                  )}
-                  {m.decision === 'act' && (
-                    <span className="text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200/60 flex items-center gap-0.5">
-                      <Calendar className="w-2.5 h-2.5" /> Booking
-                    </span>
-                  )}
-                  {m.decision === 'escalate' && (
-                    <span className="text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200/60 flex items-center gap-0.5">
-                      <ShieldAlert className="w-2.5 h-2.5" /> Escalated
-                    </span>
-                  )}
-                  {m.provider && (
-                    <span className="text-slate-500 font-mono text-[9px] bg-slate-100 px-1 py-0.5 rounded">
-                      {m.provider}
-                    </span>
-                  )}
-                </div>
-              )}
+              {/* Message Badges & Timestamps */}
+              <div className="flex items-center gap-2 mt-1 px-1 text-[10px] text-slate-400">
+                <span>{m.timestamp}</span>
+                {isOwner && (
+                  <span className="text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/60 font-medium">
+                    Verified Clinic Staff
+                  </span>
+                )}
+                {!isUser && !isOwner && (
+                  <>
+                    {m.decision === 'answer' && (
+                      <span className="text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/60 flex items-center gap-0.5">
+                        <CheckCircle2 className="w-2.5 h-2.5" /> Answered
+                      </span>
+                    )}
+                    {m.decision === 'act' && (
+                      <span className="text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200/60 flex items-center gap-0.5">
+                        <Calendar className="w-2.5 h-2.5" /> Booking
+                      </span>
+                    )}
+                    {m.decision === 'escalate' && (
+                      <span className="text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200/60 flex items-center gap-0.5">
+                        <ShieldAlert className="w-2.5 h-2.5" /> Escalated
+                      </span>
+                    )}
+                    {m.provider && (
+                      <span className="text-slate-500 font-mono text-[9px] bg-slate-100 px-1 py-0.5 rounded">
+                        {m.provider}
+                      </span>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
           );
         })}
@@ -276,9 +355,12 @@ export default function CustomerChatPage() {
             <Send className="w-4 h-4" />
           </button>
         </form>
-        <p className="text-[10px] text-center text-slate-400 mt-1.5">
-          Built with Wispr Flow for "No Hands: The Wispr Challenge" • Track 1
-        </p>
+        <div className="flex items-center justify-between text-[10px] text-slate-400 mt-1.5 px-1">
+          <span>Wispr Flow Dictation Ready</span>
+          <a href="/owner/login" className="hover:text-teal-600 hover:underline">
+            Owner Portal →
+          </a>
+        </div>
       </footer>
     </div>
   );

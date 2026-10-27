@@ -48,7 +48,7 @@ export interface LLMRequest {
 }
 
 export interface LLMResult extends LLMOutput {
-  provider: 'gemini' | 'grok' | 'fallback';
+  provider: 'gemini' | 'grok' | 'fallback' | 'kb_direct' | string;
 }
 
 export interface LLMProvider {

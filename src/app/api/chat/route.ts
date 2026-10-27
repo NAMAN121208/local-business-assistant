@@ -5,8 +5,21 @@ import { DEMO_CLINIC_ID, demoClinicBusiness } from '@/lib/kb/demo-clinic';
 import { db } from '@/lib/db';
 import { initKnowledgeBase } from '@/lib/kb';
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   await initKnowledgeBase();
+  const { searchParams } = new URL(req.url);
+  const conversationId = searchParams.get('conversationId');
+
+  if (conversationId) {
+    const conv = await db.getConversation(conversationId);
+    const messages = await db.getRecentMessages(conversationId, 40);
+    return NextResponse.json({
+      conversationId,
+      status: conv?.status || 'open',
+      messages,
+    });
+  }
+
   const biz = (await db.getBusiness(DEMO_CLINIC_ID)) || demoClinicBusiness;
   return NextResponse.json({
     business: biz,
