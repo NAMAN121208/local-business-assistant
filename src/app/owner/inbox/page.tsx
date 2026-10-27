@@ -46,6 +46,7 @@ export default function OwnerInboxPage() {
   }, []);
 
   const fetchConversations = async () => {
+    if (typeof document !== 'undefined' && document.hidden) return;
     try {
       const url =
         filter === 'all'

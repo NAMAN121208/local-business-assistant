@@ -38,6 +38,7 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
 
   const fetchStats = async () => {
     if (isLoginPage) return;
+    if (typeof document !== 'undefined' && document.hidden) return;
     try {
       const res = await fetch('/api/owner/stats');
       if (res.ok) {

@@ -60,14 +60,24 @@ export default function CustomerChatPage() {
     ]);
   }, []);
 
-  // Poll for owner replies every 4 seconds
+  // 8.4: Poll for owner replies with document.hidden guard, visibilitychange event, and exponential error backoff
   useEffect(() => {
     if (!conversationId) return;
 
+    let timeoutId: NodeJS.Timeout | null = null;
+    let consecutiveErrors = 0;
+    let isCancelled = false;
+
     const pollMessages = async () => {
+      // Stop polling when tab is hidden or minimized
+      if (typeof document !== 'undefined' && document.hidden) {
+        return;
+      }
+
       try {
         const res = await fetch(`/api/chat?conversationId=${conversationId}`);
         if (res.ok) {
+          consecutiveErrors = 0; // reset on success
           const data = await res.json();
           if (data.status) setConvStatus(data.status);
 
@@ -95,14 +105,41 @@ export default function CustomerChatPage() {
               return prev;
             });
           }
+        } else {
+          consecutiveErrors++;
         }
       } catch (e) {
-        // quiet poll fail
+        consecutiveErrors++;
+      } finally {
+        if (!isCancelled) {
+          // Exponential backoff on errors: 4s -> 8s -> 16s -> max 30s
+          const nextDelay =
+            consecutiveErrors === 0
+              ? 4000
+              : Math.min(4000 * Math.pow(2, consecutiveErrors), 30000);
+          timeoutId = setTimeout(pollMessages, nextDelay);
+        }
       }
     };
 
-    const interval = setInterval(pollMessages, 4000);
-    return () => clearInterval(interval);
+    // Initial poll after 4s
+    timeoutId = setTimeout(pollMessages, 4000);
+
+    const handleVisibilityChange = () => {
+      if (typeof document !== 'undefined' && !document.hidden) {
+        // Tab became visible again: resume immediately
+        if (timeoutId) clearTimeout(timeoutId);
+        pollMessages();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      isCancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [conversationId]);
 
   useEffect(() => {
@@ -134,6 +171,10 @@ export default function CustomerChatPage() {
         }),
       });
 
+      if (!res.ok) {
+        throw new Error(`Server returned HTTP ${res.status}`);
+      }
+
       const data = await res.json();
 
       const botMsg: ChatMessage = {
@@ -152,12 +193,14 @@ export default function CustomerChatPage() {
         setQuickReplies(data.quickReplies);
       }
     } catch (err) {
+      // 8.2: Network failure must show a friendly retry message and preserve typed text
+      setInputText(text); // Restore typed message
       setMessages((prev) => [
         ...prev,
         {
           id: `bot_err_${Date.now()}`,
           sender: 'bot',
-          text: 'Sorry, I had trouble reaching our clinic server. Please call us directly at +91 98765 43210.',
+          text: 'We had trouble reaching our clinic server. Your message has been preserved below—tap Send to retry, or call our front desk directly at +91 98765 43210.',
           decision: 'escalate',
           provider: 'offline',
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -213,7 +256,7 @@ export default function CustomerChatPage() {
         <div className="flex items-center gap-1.5 truncate">
           <ShieldAlert className="w-3.5 h-3.5 text-amber-700 flex-shrink-0" />
           <span className="truncate">
-            <strong>Notice:</strong> Demo clinic with sample data. Please don&apos;t enter real personal or medical information.
+            <strong>Notice:</strong> Demo clinic with sample data. Please do not enter real personal or medical information.
           </span>
         </div>
         <a
@@ -234,7 +277,12 @@ export default function CustomerChatPage() {
       )}
 
       {/* Chat Messages Scroll Area */}
-      <main className="flex-1 overflow-y-auto p-4 space-y-3.5 bg-slate-50/70">
+      <main
+        className="flex-1 overflow-y-auto p-4 space-y-3.5 bg-slate-50/70"
+        role="log"
+        aria-live="polite"
+        aria-label="Conversation messages"
+      >
         {messages.map((m) => {
           const isUser = m.sender === 'customer';
           const isOwner = m.sender === 'owner';
@@ -352,6 +400,7 @@ export default function CustomerChatPage() {
             maxLength={500}
             onChange={(e) => setInputText(e.target.value)}
             placeholder="Type or voice dictate your message..."
+            aria-label="Type your message"
             className="flex-1 bg-slate-100 text-slate-900 border border-slate-300 rounded-full px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:bg-white transition"
             disabled={loading}
           />

@@ -248,6 +248,52 @@ export class DBClient {
     return all.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
   }
 
+  // 7.3: Data purging for privacy compliance and maintenance
+  async purgeConversations(
+    businessId: string,
+    olderThanDays?: number
+  ): Promise<{ deletedCount: number }> {
+    let cutoffIso: string | null = null;
+    if (olderThanDays !== undefined && olderThanDays > 0) {
+      const d = new Date();
+      d.setDate(d.getDate() - olderThanDays);
+      cutoffIso = d.toISOString();
+    }
+
+    if (this.supabase) {
+      let query = this.supabase
+        .from('conversations')
+        .select('id')
+        .eq('business_id', businessId);
+      if (cutoffIso) {
+        query = query.lt('created_at', cutoffIso);
+      }
+      const { data: convs, error } = await query;
+      if (error || !convs || convs.length === 0) return { deletedCount: 0 };
+
+      const convIds = convs.map((c: any) => c.id);
+      await this.supabase.from('messages').delete().in('conversation_id', convIds);
+      await this.supabase.from('escalations').delete().in('conversation_id', convIds);
+      const { error: delErr } = await this.supabase
+        .from('conversations')
+        .delete()
+        .in('id', convIds);
+      return { deletedCount: delErr ? 0 : convIds.length };
+    }
+
+    let deletedCount = 0;
+    for (const [id, conv] of memoryStore.conversations.entries()) {
+      if (conv.business_id === businessId) {
+        if (!cutoffIso || conv.created_at < cutoffIso) {
+          memoryStore.conversations.delete(id);
+          memoryStore.messages.delete(id);
+          deletedCount++;
+        }
+      }
+    }
+    return { deletedCount };
+  }
+
   // --- MESSAGE ---
   async getRecentMessages(conversationId: string, limit: number = 20): Promise<Message[]> {
     if (this.supabase) {

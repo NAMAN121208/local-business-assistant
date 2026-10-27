@@ -157,6 +157,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const reqStart = Date.now();
     const response = await webChatAdapter.receive({
       channel: 'web',
       businessId: DEMO_CLINIC_ID,
@@ -166,6 +167,18 @@ export async function POST(req: NextRequest) {
       senderContact,
       text: sanitizedText,
     });
+    const latencyMs = Date.now() - reqStart;
+
+    // 7.1: Log IDs, decisions, providers and latency only (never full message text, names or phone numbers)
+    console.info(
+      JSON.stringify({
+        event: 'chat_request',
+        conversationId: response.conversationId,
+        decision: response.decision,
+        provider: response.provider,
+        latencyMs,
+      })
+    );
 
     const res = NextResponse.json(response);
 

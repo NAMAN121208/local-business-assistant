@@ -34,6 +34,7 @@ export default function OwnerBookingsPage() {
   }, []);
 
   const fetchBookings = async () => {
+    if (typeof document !== 'undefined' && document.hidden) return;
     try {
       const res = await fetch('/api/owner/bookings');
       if (res.ok) {
