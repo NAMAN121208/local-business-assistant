@@ -9,16 +9,24 @@ export async function POST(req: NextRequest) {
     const webhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
     const ownerChatId = process.env.TELEGRAM_OWNER_CHAT_ID;
 
-    // 1. Verify Secret Header if configured
+    if (!botToken) {
+      return NextResponse.json(
+        { error: 'Telegram integration is disabled' },
+        { status: 503 }
+      );
+    }
+
+    // 1. Verify Secret Header: Webhook secret verification
     if (webhookSecret) {
       const headerSecret = req.headers.get('x-telegram-bot-api-secret-token');
       if (headerSecret !== webhookSecret) {
         return NextResponse.json({ error: 'Unauthorized webhook request' }, { status: 401 });
       }
-    }
-
-    if (!botToken) {
-      return NextResponse.json({ error: 'TELEGRAM_BOT_TOKEN not configured' }, { status: 503 });
+    } else if (process.env.NODE_ENV === 'production') {
+      return NextResponse.json(
+        { error: 'TELEGRAM_WEBHOOK_SECRET must be configured in production' },
+        { status: 500 }
+      );
     }
 
     const update = await req.json().catch(() => null);

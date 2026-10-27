@@ -243,6 +243,55 @@ While the current live demo is hosted on web chat, the codebase includes a thin 
 
 ---
 
+## 🛡️ Data Handling, Privacy & Conversation Retention (Part 7)
+
+### What Data Is Stored & Where
+- **Customer Conversations & Messages:** When customers chat with the bot, conversation records and messages are stored in Supabase PostgreSQL (or ephemeral memory in local dev) to maintain context, allow owner review, and populate daily summaries.
+- **Bookings:** Patient appointments (service, appointment time window, customer name, contact phone) are stored in the `bookings` table.
+- **Escalations:** Queries flagged for human review (medical symptoms, complaints) are recorded in the `escalations` table.
+- **Knowledge Base Versions:** Versioned audit log of clinic facts and rules approved by the owner.
+
+### Server Log Privacy (Zero-PII Logging)
+- **Customer message bodies, names, and phone numbers are NEVER written to stdout or server logs.**
+- API route telemetry logs strictly metadata: `event`, `conversationId`, `decision` (`answer`, `act`, `escalate`), `provider` (`gemini`, `grok`, `fallback`), and `latencyMs`.
+
+### How to Purge / Delete Customer Data
+For GDPR/DPDP privacy compliance or demo maintenance, data can be purged using the provided CLI maintenance script:
+```bash
+# Purge all customer conversations and messages
+npx tsx scripts/purge-conversations.ts
+
+# Purge conversations older than 30 days
+npx tsx scripts/purge-conversations.ts --days=30
+```
+In the Owner Console, owners can also reset demo conversations at `/api/owner/demo-data` (which only resets demo-tagged records and never deletes real patient bookings).
+
+---
+
+## ⚙️ Production Environment Variables on Vercel (Part 9)
+
+Every environment variable required in production on Vercel is listed below with its behavior if omitted:
+
+| Variable Name | Required? | Purpose & Value | Behavior If Missing in Production |
+|---|---|---|---|
+| `OWNER_PASSWORD` | **REQUIRED** | Secret password for owner console login (`/owner`) | **HTTP 503:** Owner login completely disabled with logged alert. No default fallback exists. |
+| `SESSION_SECRET` | **REQUIRED** | High-entropy secret for HMAC-SHA256 session cookie signing | **HTTP 503:** Cookie creation fails. App refuses to start unauthenticated. |
+| `SUPABASE_URL` | **REQUIRED** | Supabase PostgreSQL project URL | App logs fatal error. Fails to start unless `USE_MEMORY_DB=true`. |
+| `SUPABASE_SERVICE_ROLE_KEY` | **REQUIRED** | Supabase service role key (or `SUPABASE_ANON_KEY`) | DB operations fail. App cannot persist bookings or approved KB versions. |
+| `GEMINI_API_KEY` | **REQUIRED** | Primary LLM inference API key (Google Gemini) | App fails over immediately to secondary backup (Groq/xAI). If all unset, deterministic fallback returns. |
+| `GEMINI_MODEL` | Optional | Primary model ID (Default: `gemini-flash-lite-latest`) | Uses built-in default (`gemini-flash-lite-latest`). |
+| `GROQ_API_KEY` | Recommended | Secondary LLM backup API key (Groq fast LPU inference) | Failover skips Groq and attempts xAI or safe fallback. |
+| `GROQ_MODEL` | Optional | Groq model ID (Default: `qwen/qwen3.8-27b`) | Uses default `qwen/qwen3.8-27b`. |
+| `XAI_API_KEY` | Optional | Secondary LLM backup API key (xAI Grok) | Skipped if unset. |
+| `XAI_MODEL` | Optional | xAI model ID (Default: `grok-2-latest`) | Uses default `grok-2-latest`. |
+| `PRIMARY_PROVIDER` | Optional | Primary provider selection (`gemini` or `grok`) | Defaults to `gemini`. |
+| `USE_MEMORY_DB` | Optional | Set to `true` for local development without DB | Defaults to `false` in production. |
+| `TELEGRAM_BOT_TOKEN` | Optional | Bot token from @BotFather for Telegram channel | **HTTP 503:** Telegram webhook disabled. Web chat unaffected. |
+| `TELEGRAM_WEBHOOK_SECRET` | Optional | Secret token header for webhook verification (`X-Telegram-Bot-Api-Secret-Token`) | If Telegram token is set in production without secret, webhook returns HTTP 500 to prevent spoofing. |
+| `TELEGRAM_OWNER_CHAT_ID` | Optional | Telegram chat ID for instant escalation alerts | Owner notifications skipped. |
+
+---
+
 ## 🔒 Known Limitations & Responsible AI Disclosures
 
 1. **Strictly Non-Clinical:** The assistant is explicitly constrained to administrative and logistical tasks (timings, directions, bookings, doctor schedules). It never provides medical diagnoses, medication recommendations, or drug dosages.
