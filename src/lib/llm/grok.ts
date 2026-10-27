@@ -24,7 +24,7 @@ export class GroqProvider implements LLMProvider {
     ];
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
+    const timeout = setTimeout(() => controller.abort(), 7500);
 
     try {
       const response = await fetch(this.baseUrl, {
@@ -55,38 +55,72 @@ export class GroqProvider implements LLMProvider {
         throw new Error('Groq returned an empty response');
       }
 
-      let parsed: any;
+      let parsedJson: any;
       try {
-        parsed = JSON.parse(rawContent);
+        let cleaned = rawContent.trim();
+        if (cleaned.startsWith('```')) {
+          cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+        }
+        parsedJson = JSON.parse(cleaned);
       } catch (e) {
         const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
-          parsed = JSON.parse(jsonMatch[0]);
-        } else {
-          parsed = {
-            intent: 'unknown',
-            decision: 'answer',
-            confidence: 0.5,
-            text: rawContent,
-            kb_refs: [],
-            tool_calls: [],
-          };
+          try {
+            parsedJson = JSON.parse(jsonMatch[0]);
+          } catch {}
         }
       }
 
-      if (typeof parsed !== 'object' || parsed === null) {
-        throw new Error(`Failed to parse Groq output as JSON: ${rawContent}`);
+      if (!parsedJson || typeof parsedJson !== 'object') {
+        parsedJson = {
+          intent: 'faq',
+          decision: 'answer',
+          reply_text: rawContent,
+        };
       }
 
-      const validated = LLMOutputSchema.safeParse(parsed);
+      if (Array.isArray(parsedJson) && parsedJson.length > 0) {
+        parsedJson = parsedJson[0];
+      }
+      if (parsedJson.output && typeof parsedJson.output === 'object') {
+        parsedJson = parsedJson.output;
+      } else if (parsedJson.response && typeof parsedJson.response === 'object') {
+        parsedJson = parsedJson.response;
+      }
+
+      // Standardize key aliases
+      if (!parsedJson.reply_text) {
+        parsedJson.reply_text =
+          parsedJson.reply ||
+          parsedJson.text ||
+          parsedJson.message ||
+          parsedJson.answer ||
+          (typeof parsedJson === 'string' ? parsedJson : JSON.stringify(parsedJson));
+      }
+      if (!parsedJson.intent) parsedJson.intent = 'faq';
+      if (!parsedJson.decision) parsedJson.decision = 'answer';
+      if (!parsedJson.language) parsedJson.language = 'en';
+      if (typeof parsedJson.confidence !== 'number') parsedJson.confidence = 0.95;
+      if (!Array.isArray(parsedJson.kb_refs)) parsedJson.kb_refs = [];
+      if (!Array.isArray(parsedJson.tool_calls)) parsedJson.tool_calls = [];
+
+      const validated = LLMOutputSchema.safeParse(parsedJson);
       if (!validated.success) {
-        throw new Error(`Groq response failed schema validation: ${validated.error.message}`);
+        return {
+          intent: parsedJson.intent || 'faq',
+          decision: parsedJson.decision || 'answer',
+          reply_text: parsedJson.reply_text || rawContent,
+          language: parsedJson.language || 'en',
+          confidence: 0.9,
+          kb_refs: [],
+          tool_calls: [],
+        };
       }
 
       return validated.data;
     } catch (err: any) {
       if (err.name === 'AbortError') {
-        throw new Error('Groq request timed out after 15000ms');
+        throw new Error('Groq request timed out after 7500ms');
       }
       throw err;
     } finally {

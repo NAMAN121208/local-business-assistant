@@ -26,6 +26,15 @@ function isProviderAvailable(providerName: 'gemini' | 'groq'): boolean {
   return true;
 }
 
+function tripProvider(providerName: string, durationMs: number = 60000) {
+  const key = providerName === 'grok' ? 'groq' : (providerName as 'gemini' | 'groq');
+  const state = circuitStates[key];
+  if (state) {
+    state.disabledUntil = Math.max(state.disabledUntil, Date.now() + durationMs);
+    state.consecutiveFailures = 3;
+  }
+}
+
 function recordSuccess(providerName: string) {
   const key = providerName === 'grok' ? 'groq' : (providerName as 'gemini' | 'groq');
   const state = circuitStates[key];
@@ -33,6 +42,11 @@ function recordSuccess(providerName: string) {
     state.consecutiveFailures = 0;
     state.disabledUntil = 0;
   }
+}
+
+export function resetCircuitBreakers() {
+  circuitStates.gemini = { consecutiveFailures: 0, disabledUntil: 0 };
+  circuitStates.groq = { consecutiveFailures: 0, disabledUntil: 0 };
 }
 
 function recordFailure(providerName: string) {
@@ -57,14 +71,35 @@ async function callProviderWithRetry(provider: LLMProvider, request: LLMRequest)
     recordSuccess(provider.name);
     return result;
   } catch (firstErr: any) {
+    // 1. On Rate Limit (429): Fail over immediately without wasting time on in-band retries
+    if (firstErr.status === 429 || firstErr.message?.includes('429')) {
+      const waitSeconds = firstErr.retryAfterSeconds || 30;
+      console.warn(`[LLM Failover] ${provider.name} rate-limited (429). Skipping provider for ${waitSeconds}s and failing over immediately.`);
+      tripProvider(provider.name, waitSeconds * 1000);
+      throw firstErr;
+    }
+
+    // 2. On Timeout: Fail over immediately without in-band retry to respect total 15s budget
+    if (firstErr.message?.includes('timed out') || firstErr.name === 'AbortError') {
+      console.warn(`[LLM Failover] ${provider.name} timed out. Failing over immediately.`);
+      recordFailure(provider.name);
+      throw firstErr;
+    }
+
+    // 3. For other transient errors (500, 503, network drop), try once more after short 300ms backoff
     console.warn(`[LLM Failover] ${provider.name} failed first attempt: ${firstErr.message}. Retrying once after backoff...`);
-    await sleep(600);
+    await sleep(300);
     try {
       const result = await provider.generate(request);
       recordSuccess(provider.name);
       return result;
     } catch (secondErr: any) {
-      recordFailure(provider.name);
+      if (secondErr.status === 429 || secondErr.message?.includes('429')) {
+        const waitSeconds = secondErr.retryAfterSeconds || 30;
+        tripProvider(provider.name, waitSeconds * 1000);
+      } else {
+        recordFailure(provider.name);
+      }
       throw secondErr;
     }
   }
@@ -95,8 +130,11 @@ export async function callLLM(params: {
   };
 
   const order: Array<'gemini' | 'groq'> = [primaryName, secondaryName];
+  let failedOver = false;
 
-  for (const name of order) {
+  for (let i = 0; i < order.length; i++) {
+    const name = order[i];
+    if (i > 0) failedOver = true;
     if (!isProviderAvailable(name)) {
       continue;
     }
@@ -106,9 +144,11 @@ export async function callLLM(params: {
       return {
         ...output,
         provider: name,
+        failedOver,
       };
     } catch (err: any) {
       console.error(`[LLM Failover] Provider ${name} failed:`, err.message);
+      failedOver = true;
       // continue to next provider
     }
   }

@@ -24,7 +24,7 @@ export class GeminiProvider implements LLMProvider {
     ];
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
+    const timeout = setTimeout(() => controller.abort(), 7500);
 
     try {
       const response = await fetch(this.baseUrl, {
@@ -46,6 +46,19 @@ export class GeminiProvider implements LLMProvider {
         const errorText = await response.text();
         const err = new Error(`Gemini API error (${response.status}): ${errorText}`);
         (err as any).status = response.status;
+        const retryHeader = response.headers.get('retry-after');
+        if (retryHeader) {
+          const s = parseInt(retryHeader, 10);
+          if (!isNaN(s) && s > 0) (err as any).retryAfterSeconds = s;
+        } else if (response.status === 429) {
+          // Check if Google returned a retryDelay in body e.g. "retryDelay": "21s"
+          const delayMatch = errorText.match(/retryDelay["']?\s*:\s*["']?(\d+)/i);
+          if (delayMatch) {
+            (err as any).retryAfterSeconds = parseInt(delayMatch[1], 10);
+          } else {
+            (err as any).retryAfterSeconds = 30; // default 30s rate limit window
+          }
+        }
         throw err;
       }
 
