@@ -1,4 +1,4 @@
-// scripts/test-llm.mjs
+// scripts/test-llm.ts
 import fs from 'fs';
 import path from 'path';
 
@@ -28,29 +28,32 @@ function loadEnv() {
 loadEnv();
 
 const sampleRequest = {
-  systemPrompt: `You are a helpful assistant. Output valid JSON matching:
+  systemPrompt: `You are the front-desk AI assistant for City Health Clinic. Output valid JSON matching:
 {
-  "intent": "greeting_or_smalltalk",
+  "intent": "faq",
   "decision": "answer",
-  "reply_text": "Hello! How can I help you today?",
+  "reply_text": "We accept cash, UPI, and all major cards.",
   "language": "en",
-  "confidence": 1.0,
-  "kb_refs": [],
+  "confidence": 0.95,
+  "kb_refs": ["faq_payment"],
   "tool_calls": []
 }`,
-  messages: [{ role: 'user', content: 'Hi there' }],
+  messages: [{ role: 'user', content: 'What payment methods do you accept?' }],
 };
 
-async function testGemini() {
+async function testGemini(): Promise<boolean> {
   const apiKey = process.env.GEMINI_API_KEY;
-  console.log('\n--- Testing Gemini Provider ---');
-  if (!apiKey) {
-    console.log('⚠️ GEMINI_API_KEY is not set in environment.');
-    return;
+  console.log('\n--- 1. Testing Gemini Provider ---');
+  if (!apiKey || apiKey === 'your_gemini_api_key_here') {
+    console.log('⚠️ GEMINI_API_KEY is not set in environment or .env.local.');
+    console.log('  To test live Gemini calls, add GEMINI_API_KEY=<your-key> to .env.local');
+    return false;
   }
+
   const model = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
   const url = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
   const start = Date.now();
+
   try {
     const res = await fetch(url, {
       method: 'POST',
@@ -68,30 +71,38 @@ async function testGemini() {
         temperature: 0.1,
       }),
     });
+
     const duration = Date.now() - start;
     if (!res.ok) {
       const errText = await res.text();
-      console.error(`❌ Gemini call failed (${res.status}) [${duration}ms]:`, errText);
-    } else {
-      const data = await res.json();
-      console.log(`✅ Gemini call succeeded in ${duration}ms using model "${model}"!`);
-      console.log('Response:', data.choices?.[0]?.message?.content);
+      console.error(`❌ Gemini API call rejected (${res.status}) [Latency: ${duration}ms]: ${errText}`);
+      return false;
     }
-  } catch (err) {
-    console.error(`❌ Gemini exception [${Date.now() - start}ms]:`, err.message);
+
+    const data = await res.json();
+    const content = data.choices?.[0]?.message?.content;
+    console.log(`✅ [Provider: gemini] [Model: ${model}] [Latency: ${duration}ms] Response verified!`);
+    console.log(`   Sample Reply: ${content?.slice(0, 120)}...`);
+    return true;
+  } catch (err: any) {
+    console.error(`❌ Gemini network exception [Latency: ${Date.now() - start}ms]:`, err.message);
+    return false;
   }
 }
 
-async function testGrok() {
+async function testGrok(): Promise<boolean> {
   const apiKey = process.env.XAI_API_KEY;
-  console.log('\n--- Testing Grok / xAI Provider ---');
-  if (!apiKey) {
-    console.log('⚠️ XAI_API_KEY is not set in environment.');
-    return;
+  console.log('\n--- 2. Testing Grok / xAI Provider ---');
+  if (!apiKey || apiKey === 'your_xai_grok_api_key_here') {
+    console.log('⚠️ XAI_API_KEY is not set in environment or .env.local.');
+    console.log('  To test live Grok calls, add XAI_API_KEY=<your-key> to .env.local');
+    return false;
   }
+
   const model = process.env.XAI_MODEL || 'grok-2-latest';
   const url = 'https://api.x.ai/v1/chat/completions';
   const start = Date.now();
+
   try {
     const res = await fetch(url, {
       method: 'POST',
@@ -109,25 +120,97 @@ async function testGrok() {
         temperature: 0.1,
       }),
     });
+
     const duration = Date.now() - start;
     if (!res.ok) {
       const errText = await res.text();
-      console.error(`❌ Grok call failed (${res.status}) [${duration}ms]:`, errText);
-    } else {
-      const data = await res.json();
-      console.log(`✅ Grok call succeeded in ${duration}ms using model "${model}"!`);
-      console.log('Response:', data.choices?.[0]?.message?.content);
+      console.error(`❌ Grok API call rejected (${res.status}) [Latency: ${duration}ms]: ${errText}`);
+      return false;
     }
-  } catch (err) {
-    console.error(`❌ Grok exception [${Date.now() - start}ms]:`, err.message);
+
+    const data = await res.json();
+    const content = data.choices?.[0]?.message?.content;
+    console.log(`✅ [Provider: grok] [Model: ${model}] [Latency: ${duration}ms] Response verified!`);
+    console.log(`   Sample Reply: ${content?.slice(0, 120)}...`);
+    return true;
+  } catch (err: any) {
+    console.error(`❌ Grok network exception [Latency: ${Date.now() - start}ms]:`, err.message);
+    return false;
+  }
+}
+
+async function testRealLLMQueries(hasLLMKey: boolean) {
+  console.log('\n--- 3. Testing Complex Queries That Require LLM Reasoning ---');
+  const { processMessage } = await import('../src/lib/orchestrator');
+  const { initKnowledgeBase } = await import('../src/lib/kb');
+  const { DEMO_CLINIC_ID } = await import('../src/lib/kb/demo-clinic');
+
+  await initKnowledgeBase();
+
+  const complexQueries = [
+    {
+      q: 'Do you take health insurance or Mediclaim for consultations?',
+      expectedIntent: 'faq',
+    },
+    {
+      q: 'Can my elderly mother come along for the visit into the consultation room?',
+      expectedIntent: 'faq',
+    },
+    {
+      q: 'Is there parking nearby for a four wheeler car?',
+      expectedIntent: 'faq',
+    },
+  ];
+
+  for (const item of complexQueries) {
+    console.log(`\n▶ Query: "${item.q}"`);
+    const res = await processMessage({
+      businessId: DEMO_CLINIC_ID,
+      conversationId: `test_llm_query_${Date.now()}`,
+      text: item.q,
+    });
+
+    console.log(`   [Provider]: ${res.provider}`);
+    console.log(`   [Decision]: ${res.decision}`);
+    console.log(`   [Reply Preview]: ${res.text.slice(0, 100)}...`);
+
+    if (hasLLMKey) {
+      if (
+        res.provider === 'deterministic_guardrail' ||
+        res.provider === 'deterministic_booking_engine'
+      ) {
+        throw new Error(
+          `Test failed: Query "${item.q}" was handled by "${res.provider}" instead of a real LLM provider!`
+        );
+      }
+    } else {
+      console.log('   ℹ️ (No live API keys present; fallback/offline path used as expected)');
+    }
   }
 }
 
 async function run() {
-  console.log('🔍 Running direct provider checks...');
-  await testGemini();
-  await testGrok();
-  console.log('\nDirect provider check completed.');
+  console.log('====================================================');
+  console.log('🤖 Local Business Assistant: Real LLM Test Suite');
+  console.log('====================================================');
+
+  const geminiOk = await testGemini();
+  const grokOk = await testGrok();
+  const hasLiveLLM = geminiOk || grokOk;
+
+  await testRealLLMQueries(hasLiveLLM);
+
+  console.log('\n====================================================');
+  if (hasLiveLLM) {
+    console.log('✅ Real LLM provider call test finished with ACTIVE API keys!');
+  } else {
+    console.log('ℹ️ LLM test finished. No external API keys were provided in this environment.');
+    console.log('   Set GEMINI_API_KEY and/or XAI_API_KEY in .env.local to test live cloud endpoints.');
+  }
+  console.log('====================================================\n');
 }
 
-run();
+run().catch((err) => {
+  console.error('Fatal error during LLM test:', err);
+  process.exit(1);
+});

@@ -212,6 +212,97 @@ export function computeKBDiff(
 }
 
 /**
+ * Code-level validation to prevent unauthorized or hallucinated mutations after voice corrections.
+ * Any KB field modified that the correction text did not explicitly mention is reverted and logged.
+ */
+export function validateAndConstrainCorrection(
+  correctionText: string,
+  before: KnowledgeBaseContent,
+  candidateAfter: KnowledgeBaseContent
+): {
+  constrainedContent: KnowledgeBaseContent;
+  rejectedModifications: string[];
+} {
+  const lower = correctionText.toLowerCase();
+  const constrained: KnowledgeBaseContent = JSON.parse(JSON.stringify(candidateAfter));
+  const rejectedModifications: string[] = [];
+
+  // 1. Working Hours validation per day
+  const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  for (const day of days) {
+    const dayLower = day.toLowerCase();
+    const isDayMentioned =
+      lower.includes(dayLower) ||
+      (dayLower === 'sunday' && (lower.includes('weekend') || lower.includes('closed')));
+    const beforeHour = before.facts.hours?.[day];
+    const candidateHour = candidateAfter.facts.hours?.[day];
+
+    if (!isDayMentioned && beforeHour !== candidateHour) {
+      constrained.facts.hours[day] = beforeHour;
+      rejectedModifications.push(
+        `Unrelated change to ${day} hours reverted: "${candidateHour}" -> "${beforeHour}"`
+      );
+    }
+  }
+
+  // 2. Services & Pricing validation
+  const mentionsPricing =
+    lower.includes('price') ||
+    lower.includes('fee') ||
+    lower.includes('rupee') ||
+    lower.includes('cost') ||
+    lower.includes('charge');
+  const mentionsService =
+    lower.includes('service') ||
+    lower.includes('doctor') ||
+    lower.includes('consultation') ||
+    lower.includes('treatment');
+
+  if (!mentionsPricing && !mentionsService) {
+    if (JSON.stringify(before.services) !== JSON.stringify(candidateAfter.services)) {
+      constrained.services = JSON.parse(JSON.stringify(before.services));
+      rejectedModifications.push(
+        'Unrelated modifications to clinic services and consultation fees reverted'
+      );
+    }
+  }
+
+  // 3. Location / Address validation
+  const mentionsAddress =
+    lower.includes('address') ||
+    lower.includes('location') ||
+    lower.includes('road') ||
+    lower.includes('street') ||
+    lower.includes('landmark');
+  if (!mentionsAddress) {
+    if (before.facts.address !== candidateAfter.facts.address) {
+      constrained.facts.address = before.facts.address;
+      rejectedModifications.push('Unrelated change to clinic address reverted');
+    }
+  }
+
+  // 4. Critical Safety Guardrail Enforcement (never_answer & escalation_rules)
+  const explicitSafetyBypass =
+    lower.includes('remove safety') || lower.includes('allow medical advice');
+  if (!explicitSafetyBypass) {
+    for (const rule of before.never_answer || []) {
+      if (!constrained.never_answer.includes(rule)) {
+        constrained.never_answer.push(rule);
+        rejectedModifications.push(`Critical safety guardrail protected from deletion: "${rule}"`);
+      }
+    }
+    for (const escRule of before.escalation_rules || []) {
+      if (!constrained.escalation_rules.includes(escRule)) {
+        constrained.escalation_rules.push(escRule);
+        rejectedModifications.push(`Escalation rule protected from deletion: "${escRule}"`);
+      }
+    }
+  }
+
+  return { constrainedContent: constrained, rejectedModifications };
+}
+
+/**
  * Identifies missing details from extracted KB content
  */
 export function detectMissingInformation(kb: KnowledgeBaseContent): string[] {
