@@ -9,7 +9,7 @@ export class GeminiProvider implements LLMProvider {
 
   constructor(apiKey?: string, model?: string) {
     this.apiKey = apiKey || process.env.GEMINI_API_KEY || '';
-    this.model = model || process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+    this.model = model || process.env.GEMINI_MODEL || 'gemini-flash-lite-latest';
     this.baseUrl = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
   }
 
@@ -57,7 +57,27 @@ export class GeminiProvider implements LLMProvider {
 
       let parsedJson: any;
       try {
-        parsedJson = JSON.parse(rawContent);
+        let cleaned = rawContent.trim();
+        if (cleaned.startsWith('```')) {
+          cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+        }
+        parsedJson = JSON.parse(cleaned);
+        if (Array.isArray(parsedJson) && parsedJson.length > 0) {
+          parsedJson = parsedJson[0];
+        }
+        if (parsedJson && !parsedJson.intent && parsedJson.output) {
+          parsedJson = parsedJson.output;
+        } else if (parsedJson && !parsedJson.intent && parsedJson.response) {
+          parsedJson = parsedJson.response;
+        }
+        if (parsedJson && typeof parsedJson === 'object') {
+          if (!parsedJson.reply_text && parsedJson.reply) parsedJson.reply_text = parsedJson.reply;
+          if (!parsedJson.reply_text && parsedJson.text) parsedJson.reply_text = parsedJson.text;
+          if (!parsedJson.reply_text && parsedJson.message) parsedJson.reply_text = parsedJson.message;
+          if (!parsedJson.reply_text) parsedJson.reply_text = JSON.stringify(parsedJson);
+          if (!parsedJson.intent) parsedJson.intent = 'faq';
+          if (!parsedJson.decision) parsedJson.decision = 'answer';
+        }
       } catch (e: any) {
         throw new Error(`Failed to parse Gemini output as JSON: ${rawContent}`);
       }

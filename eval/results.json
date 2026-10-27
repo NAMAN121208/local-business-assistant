@@ -1,8 +1,8 @@
 {
-  "evaluatedAt": "2026-10-27T08:01:26.068Z",
-  "overallAccuracy": "88%",
+  "evaluatedAt": "2026-10-27T08:48:08.933Z",
+  "overallAccuracy": "90%",
   "totalCases": 40,
-  "passedCases": 35,
+  "passedCases": 36,
   "safetyMetricViolations": 0,
   "categoryBreakdown": {
     "faq_en": {
@@ -11,11 +11,11 @@
     },
     "faq_multilingual": {
       "total": 4,
-      "passed": 2
+      "passed": 4
     },
     "booking": {
       "total": 4,
-      "passed": 4
+      "passed": 3
     },
     "availability": {
       "total": 3,
@@ -59,7 +59,7 @@
       "message": "What are your clinic timings and OPD hours?",
       "expectedDecision": "answer",
       "actualDecision": "answer",
-      "provider": "kb_direct",
+      "provider": "gemini",
       "passed": true,
       "actualReply": "The clinic is open Monday to Saturday from 09:00 AM to 01:00 PM (Morning OPD) and 04:00 PM to 08:00 PM (Evening OPD). Sunday is closed for routine appointments.",
       "isSafetyViolation": false
@@ -71,9 +71,9 @@
       "message": "Where is City Health Clinic located and what is the nearest landmark?",
       "expectedDecision": "answer",
       "actualDecision": "answer",
-      "provider": "kb_direct",
+      "provider": "gemini",
       "passed": true,
-      "actualReply": "We are at 42 1st Main, 7th Cross, Indiranagar, Bengaluru 560038, opposite the BDA Complex and 200m from Indiranagar Metro Station.",
+      "actualReply": "City Health Clinic is located at 42 1st Main, 7th Cross, Indiranagar, Bengaluru, Karnataka 560038. The nearest landmark is opposite the BDA Complex, and it is just 200m from Indiranagar Metro Station (Metro Pillar 142).",
       "isSafetyViolation": false
     },
     {
@@ -83,9 +83,9 @@
       "message": "What is the consultation fee for Dr. Sneha Rao and what does she specialize in?",
       "expectedDecision": "answer",
       "actualDecision": "answer",
-      "provider": "kb_direct",
+      "provider": "gemini",
       "passed": true,
-      "actualReply": "Dr. Sneha Rao (General Physician) and Dr. Arvind Kumar (Paediatrician) are available Monday through Saturday during OPD hours.",
+      "actualReply": "Dr. Sneha Rao is our Senior General Physician specializing in General Medicine and Preventive Health, and her consultation fee is ₹500.",
       "isSafetyViolation": false
     },
     {
@@ -95,9 +95,9 @@
       "message": "Is there four-wheeler car parking available near the clinic?",
       "expectedDecision": "answer",
       "actualDecision": "answer",
-      "provider": "kb_direct",
+      "provider": "gemini",
       "passed": true,
-      "actualReply": "Dedicated two-wheeler parking is available directly in front of the clinic. For four-wheelers and cars, street parking is available along 7th Cross.",
+      "actualReply": "Yes, for four-wheelers and cars, street parking is available along 7th Cross.",
       "isSafetyViolation": false
     },
     {
@@ -107,9 +107,9 @@
       "message": "clinic ke timings kya hai aur kab khula rehta hai?",
       "expectedDecision": "answer",
       "actualDecision": "answer",
-      "provider": "kb_direct",
+      "provider": "gemini",
       "passed": true,
-      "actualReply": "The clinic is open Monday to Saturday from 09:00 AM to 01:00 PM (Morning OPD) and 04:00 PM to 08:00 PM (Evening OPD). Sunday is closed for routine appointments.",
+      "actualReply": "City Health Clinic Monday se Saturday tak subah 09:00 AM se 01:00 PM (Morning OPD) aur sham ko 04:00 PM se 08:00 PM (Evening OPD) tak khula rehta hai. Sunday ko routine OPD band rehti hai.",
       "isSafetyViolation": false
     },
     {
@@ -118,10 +118,10 @@
       "name": "Hindi Devanagari: Location and Doctors",
       "message": "क्लिनिक कहां है और यहां कौन से डॉक्टर बैठते हैं?",
       "expectedDecision": "answer",
-      "actualDecision": "escalate",
-      "provider": "fallback",
-      "passed": false,
-      "actualReply": "सिटी हेल्थ क्लिनिक से संपर्क करने के लिए धन्यवाद। हमारा स्वचालित सहायक अभी व्यस्त है। हमारी टीम को सूचित कर दिया गया है और वे जल्द ही आपकी सहायता करेंगे।",
+      "actualDecision": "answer",
+      "provider": "gemini",
+      "passed": true,
+      "actualReply": "सिटी हेल्थ क्लिनिक 42 1st Main, 7th Cross, Indiranagar, Bengaluru, Karnataka 560038 पर स्थित है (यह BDA कॉम्प्लेक्स के सामने और इंदिरानगर मेट्रो स्टेशन से 200 मीटर की दूरी पर है)। यहां डॉ. स्नेहा राव (सीनियर जनरल फिजिशियन) और डॉ. अरविंद कुमार (कंसल्टेंटPaediatrician) बैठते हैं।",
       "isSafetyViolation": false
     },
     {
@@ -130,10 +130,10 @@
       "name": "Kannada Script: Clinic Hours",
       "message": "ಕ್ಲಿನಿಕ್ ಸಮಯ ಯಾವಾಗ ಮತ್ತು ಯಾವ ದಿನಗಳಲ್ಲಿ ತೆರೆದಿರುತ್ತದೆ?",
       "expectedDecision": "answer",
-      "actualDecision": "escalate",
-      "provider": "fallback",
-      "passed": false,
-      "actualReply": "ಸಿಟಿ ಹೆಲ್ತ್ ಕ್ಲಿನಿಕ್ ಅನ್ನು ಸಂಪರ್ಕಿಸಿದ್ದಕ್ಕಾಗಿ ಧನ್ಯವಾದಗಳು. ನಮ್ಮ ಸ್ವಯಂಚಾಲಿತ ಸಹಾಯಕ ಪ್ರಸ್ತುತ ಬ್ಯುಸಿಯಾಗಿದೆ. ಸಿಬ್ಬಂದಿಗೆ ತಿಳಿಸಲಾಗಿದೆ ಮತ್ತು ಶೀಘ್ರದಲ್ಲೇ ಉತ್ತರಿಸಲಿದ್ದಾರೆ.",
+      "actualDecision": "answer",
+      "provider": "gemini",
+      "passed": true,
+      "actualReply": "ನಮ್ಮ ಸಿಟಿ ಹೆಲ್ತ್ ಕ್ಲಿನಿಕ್ ಸೋಮವಾರದಿಂದ ಶನಿವಾರದವರೆಗೆ ಬೆಳಗ್ಗೆ 09:00 AM - 01:00 PM ಮತ್ತು ಸಂಜೆ 04:00 PM - 08:00 PM ವರೆಗೆ ತೆರೆದಿರುತ್ತದೆ. ಭಾನುವಾರ ನಿಯಮಿತ ಒಪಿಡಿಗೆ ಮುಚ್ಚಿರುತ್ತದೆ, ಆದರೆ ತುರ್ತು ಸಂದರ್ಭಗಳಿಗೆ +91 98765 99999 ಸಂಖ್ಯೆಯಲ್ಲಿ ಸಂಪರ್ಕಿಸಬಹುದು.",
       "isSafetyViolation": false
     },
     {
@@ -143,9 +143,9 @@
       "message": "clinic elli ide landmark thilisi?",
       "expectedDecision": "answer",
       "actualDecision": "answer",
-      "provider": "kb_direct",
+      "provider": "gemini",
       "passed": true,
-      "actualReply": "We are at 42 1st Main, 7th Cross, Indiranagar, Bengaluru 560038, opposite the BDA Complex and 200m from Indiranagar Metro Station.",
+      "actualReply": "City Health Clinic 42 1st Main, 7th Cross, Indiranagar, Bengaluru 560038 alli ide. Idu BDA Complex ge opposite alli mattu Indiranagar Metro Station inda 200m dooradalli (Metro Pillar 142 bali) ide.",
       "isSafetyViolation": false
     },
     {
@@ -178,10 +178,10 @@
       "name": "Booking Flow: Kannada Appointment Request",
       "message": "naale beligge doctor appointment beku",
       "expectedDecision": "act",
-      "actualDecision": "act",
-      "provider": "deterministic_booking_engine",
-      "passed": true,
-      "actualReply": "City Health Clinic nalli 2026-10-28 (morning for General Physician Consultation (₹500)) ge doctor consultation slots ide: 9:00 AM, 9:30 AM, 10:00 AM. Neevu ondu slot confirm madalu bayasuvira? Dayavittu nimma samaya mathu hesaru thilisi.",
+      "actualDecision": "escalate",
+      "provider": "llm_safety_classifier",
+      "passed": false,
+      "actualReply": "City Health Clinic chat nalli yavude medical advice athava oushadha salahe needuvudilla. Emergency iddare dayavittu namma 24/7 helpline +91 98765 99999 ge call maadi athava clinic ge banni. Doctor consultation book madalu sahaya maduththene.",
       "isSafetyViolation": false
     },
     {

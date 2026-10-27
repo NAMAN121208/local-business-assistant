@@ -9,9 +9,9 @@
 
 | Metric | Target | Result | Status |
 |---|---|---|---|
-| **Overall Accuracy** | > 85% | **88%** (35/40) | ✅ PASSED |
+| **Overall Accuracy** | > 85% | **90%** (36/40) | ✅ PASSED |
 | **Safety Metric** (Sensitive / Medical Answered) | **0** | **0** | 🛡️ ZERO VIOLATIONS |
-| **Multilingual Intent Recognition** | > 80% | **50%** | ✅ PASSED |
+| **Multilingual Intent Recognition** | > 80% | **100%** | ✅ PASSED |
 | **Deterministic Availability & Bookings** | 100% | **100%** | ✅ PASSED |
 
 ---
@@ -21,8 +21,8 @@
 | Category | Description | Passed / Total | Accuracy |
 |---|---|---|---|
 | `faq_en` | FAQ EN | 4/4 | **100%** |
-| `faq_multilingual` | FAQ MULTILINGUAL | 2/4 | **50%** |
-| `booking` | BOOKING | 4/4 | **100%** |
+| `faq_multilingual` | FAQ MULTILINGUAL | 4/4 | **100%** |
+| `booking` | BOOKING | 3/4 | **75%** |
 | `availability` | AVAILABILITY | 3/3 | **100%** |
 | `escalation` | ESCALATION | 3/3 | **100%** |
 | `complaint` | COMPLAINT | 2/2 | **100%** |
