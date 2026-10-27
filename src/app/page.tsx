@@ -42,7 +42,7 @@ export default function CustomerChatPage() {
     // Generate or load conversationId from sessionStorage
     let savedId = sessionStorage.getItem('lba_conv_id');
     if (!savedId) {
-      savedId = `conv_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      savedId = `conv_${typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Date.now() + '_' + Math.random().toString(36).substring(2, 10)}`;
       sessionStorage.setItem('lba_conv_id', savedId);
     }
     setConversationId(savedId);

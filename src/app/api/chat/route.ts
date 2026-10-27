@@ -32,12 +32,40 @@ function isRateLimited(ip: string, limit: number = 20, windowMs: number = 60000)
   return false;
 }
 
+import { z } from 'zod';
+import {
+  CHAT_COOKIE_NAME,
+  createCustomerSessionToken,
+  isOwnerAuthenticated,
+  verifyCustomerSessionToken,
+} from '@/lib/auth';
+
+const ChatBodySchema = z.object({
+  text: z.string({ required_error: 'Text message is required' }),
+  conversationId: z.string().max(100).optional(),
+  customerId: z.string().max(100).optional(),
+  senderName: z.string().max(100).optional(),
+  senderContact: z.string().max(50).optional(),
+});
+
 export async function GET(req: NextRequest) {
   await initKnowledgeBase();
   const { searchParams } = new URL(req.url);
   const conversationId = searchParams.get('conversationId');
 
   if (conversationId) {
+    // 2.3 Access Control on Conversations: verify customer ownership or owner auth
+    const isOwner = await isOwnerAuthenticated(req);
+    const customerToken = req.cookies.get(CHAT_COOKIE_NAME)?.value;
+    const isCustomerAuthorized = await verifyCustomerSessionToken(customerToken, conversationId);
+
+    if (!isOwner && !isCustomerAuthorized) {
+      return NextResponse.json(
+        { error: 'Forbidden: You do not have permission to access this conversation.' },
+        { status: 403 }
+      );
+    }
+
     const conv = await db.getConversation(conversationId);
     const messages = await db.getRecentMessages(conversationId, 40);
     return NextResponse.json({
@@ -82,21 +110,45 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const body = await req.json().catch(() => ({}));
-    const { text, conversationId, customerId, senderName, senderContact } = body;
+    // Body size validation (max 64KB)
+    const contentLength = req.headers.get('content-length');
+    if (contentLength && parseInt(contentLength, 10) > 65536) {
+      return NextResponse.json(
+        { error: 'Payload too large. Message body must be under 64KB.' },
+        { status: 413 }
+      );
+    }
 
-    // 2. Abuse Protection: Empty Message Validation
-    if (!text || typeof text !== 'string' || !text.trim()) {
+    const rawBody = await req.json().catch(() => null);
+    if (!rawBody) {
+      return NextResponse.json(
+        { error: 'Invalid JSON request payload.' },
+        { status: 400 }
+      );
+    }
+
+    // 2. Strict Zod Input Validation
+    const parseResult = ChatBodySchema.safeParse(rawBody);
+    if (!parseResult.success) {
+      const errorMsg = parseResult.error.errors.map((e) => e.message).join(', ');
+      return NextResponse.json({ error: errorMsg }, { status: 400 });
+    }
+
+    const { text, conversationId, customerId, senderName, senderContact } = parseResult.data;
+
+    // Strip zero-width & invisible control characters
+    const sanitizedText = text.replace(/[\u200B-\u200D\uFEFF\u0000-\u0008\u000E-\u001F]/g, '').trim();
+
+    // 3. Abuse Protection: Empty Message Validation
+    if (!sanitizedText) {
       return NextResponse.json(
         { error: 'Empty message ignored. Please provide text.' },
         { status: 400 }
       );
     }
 
-    const trimmedText = text.trim();
-
-    // 3. Abuse Protection: Character Cap (500 chars max)
-    if (trimmedText.length > 500) {
+    // 4. Abuse Protection: Character Cap (500 chars max)
+    if (sanitizedText.length > 500) {
       return NextResponse.json(
         {
           error: 'Message exceeds 500 characters limit. Please shorten your message.',
@@ -112,12 +164,26 @@ export async function POST(req: NextRequest) {
       customerId,
       senderName,
       senderContact,
-      text: trimmedText,
+      text: sanitizedText,
     });
 
-    return NextResponse.json(response);
+    const res = NextResponse.json(response);
+
+    // Set signed customer conversation session cookie for ownership
+    if (response.conversationId) {
+      const token = await createCustomerSessionToken(response.conversationId);
+      res.cookies.set(CHAT_COOKIE_NAME, token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 60 * 60 * 24 * 30, // 30 days
+        path: '/',
+      });
+    }
+
+    return res;
   } catch (error: any) {
-    console.error('Chat API Error:', error);
+    console.error('Chat API Error:', error?.message || 'Unknown error');
     return NextResponse.json(
       {
         error: 'Internal server error',

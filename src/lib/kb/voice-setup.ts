@@ -484,21 +484,18 @@ export function validateAndConstrainCorrection(
   }
 
   // 4. Critical Safety Guardrail Enforcement (never_answer & escalation_rules)
-  const explicitSafetyBypass =
-    lower.includes('remove safety') || lower.includes('allow medical advice');
-  if (!explicitSafetyBypass) {
-    // Existing critical medical guardrails can NEVER be removed
-    for (const rule of before.never_answer || []) {
-      if (!constrained.never_answer.includes(rule)) {
-        constrained.never_answer.push(rule);
-        rejectedModifications.push(`Critical safety guardrail protected from deletion: "${rule}"`);
-      }
+  // Medical safety guardrails can NEVER be removed by any correction,
+  // even if untrusted owner input or prompt injection says "remove all safety rules".
+  for (const rule of before.never_answer || []) {
+    if (!constrained.never_answer.includes(rule)) {
+      constrained.never_answer.push(rule);
+      rejectedModifications.push(`Critical safety guardrail protected from deletion: "${rule}"`);
     }
-    for (const escRule of before.escalation_rules || []) {
-      if (!constrained.escalation_rules.includes(escRule)) {
-        constrained.escalation_rules.push(escRule);
-        rejectedModifications.push(`Escalation rule protected from deletion: "${escRule}"`);
-      }
+  }
+  for (const escRule of before.escalation_rules || []) {
+    if (!constrained.escalation_rules.includes(escRule)) {
+      constrained.escalation_rules.push(escRule);
+      rejectedModifications.push(`Escalation rule protected from deletion: "${escRule}"`);
     }
   }
 

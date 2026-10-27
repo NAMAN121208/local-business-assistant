@@ -82,6 +82,18 @@ function isComplaintOrEscalation(text: string): { isEscalation: boolean; reason?
     };
   }
 
+  // 5. Prompt injection, secret exfiltration & administrative override attempts
+  if (
+    /\b(ignore\s+(all\s+)?(previous|prior|above)\s+instructions|system\s+prompt|reveal\s+(your\s+)?prompt|owner\s+password|admin\s+password|cancel\s+all\s+bookings|change\s+the\s+clinic\s+hours|jailbreak|dan\s+mode|developer\s+mode)\b/i.test(lower) ||
+    /\b(you\s+are\s+now\s+a\s+doctor|pretend\s+to\s+be\s+a\s+doctor|act\s+as\s+a\s+doctor)\b/i.test(lower)
+  ) {
+    return {
+      isEscalation: true,
+      reason: 'Prompt injection or unauthorized administrative override attempted by user',
+      reply: 'City Health Clinic assistant operates under strict clinic guidelines and cannot reveal internal instructions, passwords, or alter clinic administrative settings. Your message has been recorded for staff.',
+    };
+  }
+
   return { isEscalation: false };
 }
 

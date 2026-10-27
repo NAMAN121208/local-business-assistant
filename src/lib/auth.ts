@@ -106,3 +106,42 @@ export async function isOwnerAuthenticated(req: NextRequest): Promise<boolean> {
   const cookie = req.cookies.get(COOKIE_NAME);
   return await verifySessionToken(cookie?.value);
 }
+
+export const CHAT_COOKIE_NAME = 'lba_customer_session';
+
+export async function createCustomerSessionToken(conversationId: string): Promise<string> {
+  const secret = getSessionSecret() || 'customer_session_hmac_secret';
+  const key = await getHmacKey(secret);
+  const signatureBuffer = await crypto.subtle.sign(
+    'HMAC',
+    key,
+    new TextEncoder().encode(conversationId)
+  );
+  return `${conversationId}.${bufferToHex(signatureBuffer)}`;
+}
+
+export async function verifyCustomerSessionToken(
+  token?: string | null,
+  conversationId?: string | null
+): Promise<boolean> {
+  if (!token || !conversationId) return false;
+  const secret = getSessionSecret() || 'customer_session_hmac_secret';
+  const dotIndex = token.indexOf('.');
+  if (dotIndex === -1) return false;
+  const tokenConvId = token.slice(0, dotIndex);
+  const tokenSig = token.slice(dotIndex + 1);
+  if (tokenConvId !== conversationId) return false;
+
+  try {
+    const key = await getHmacKey(secret);
+    const sigBytes = hexToBuffer(tokenSig);
+    return await crypto.subtle.verify(
+      'HMAC',
+      key,
+      sigBytes,
+      new TextEncoder().encode(conversationId)
+    );
+  } catch {
+    return false;
+  }
+}
