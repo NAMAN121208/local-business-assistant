@@ -9,7 +9,7 @@ export class GeminiProvider implements LLMProvider {
 
   constructor(apiKey?: string, model?: string) {
     this.apiKey = apiKey || process.env.GEMINI_API_KEY || '';
-    this.model = model || process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+    this.model = model || process.env.GEMINI_MODEL || 'gemini-2.5-flash';
     this.baseUrl = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
   }
 

@@ -61,20 +61,10 @@ function LoginForm() {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter owner password (e.g. owner123)"
+              placeholder="Enter your OWNER_PASSWORD"
               className="block w-full pl-9 pr-3 py-2.5 sm:text-sm border border-slate-300 rounded-lg focus:ring-teal-500 focus:border-teal-500 bg-slate-50/50"
             />
           </div>
-          <p className="mt-1.5 text-xs text-slate-500 flex items-center justify-between">
-            <span>Demo/Judge Password: <code className="font-mono font-bold text-teal-700 bg-teal-50 px-1.5 py-0.5 rounded border border-teal-200">owner123</code></span>
-            <button
-              type="button"
-              onClick={() => setPassword('owner123')}
-              className="text-teal-600 hover:text-teal-800 font-semibold underline text-[11px]"
-            >
-              Fill password
-            </button>
-          </p>
         </div>
 
         {error && (

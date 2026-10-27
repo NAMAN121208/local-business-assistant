@@ -37,7 +37,7 @@ Judges can verify the entire end-to-end customer and voice-management loop in un
 
 ### Step 2: Owner Console & Voice Correction (30 Seconds)
 1. Open `https://local-business-assistant.vercel.app/owner`
-2. Enter the Owner Password: `owner123` (or your configured `OWNER_PASSWORD`)
+2. Enter the Owner Password: `[YOUR CONFIGURED OWNER_PASSWORD]`
 3. **Inspect the Inbox:** Notice the escalated medical thread flagged with an amber badge (`needs_human`).
 4. **Try the Voice Setup & Correction:**
    - Go to **Unanswered & Fixes** or **Voice KB Setup**.

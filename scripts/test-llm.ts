@@ -43,14 +43,55 @@ const sampleRequest = {
 
 async function testGemini(): Promise<boolean> {
   const apiKey = process.env.GEMINI_API_KEY;
-  console.log('\n--- 1. Testing Gemini Provider ---');
+  console.log('\n--- 1. Testing Gemini Provider & Models Discovery ---');
   if (!apiKey || apiKey === 'your_gemini_api_key_here') {
     console.log('⚠️ GEMINI_API_KEY is not set in environment or .env.local.');
     console.log('  To test live Gemini calls, add GEMINI_API_KEY=<your-key> to .env.local');
     return false;
   }
 
-  const model = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+
+  // Step 1: Call Gemini's models endpoint to discover available models in user's account
+  console.log('  [Models Endpoint]: Querying Google Generative Language models API...');
+  let availableModels: string[] = [];
+  try {
+    const listRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`,
+      { method: 'GET' }
+    );
+    if (!listRes.ok) {
+      const err = await listRes.text();
+      console.error(`❌ Failed to query Gemini models endpoint (${listRes.status}): ${err}`);
+      return false;
+    }
+    const listData = await listRes.json();
+    availableModels = (listData.models || []).map((m: any) =>
+      (m.name || '').replace(/^models\//, '')
+    );
+    console.log(
+      `  [Models Endpoint]: Account has ${availableModels.length} models available (e.g. ${availableModels.slice(0, 5).join(', ')}...)`
+    );
+
+    const modelExists = availableModels.some(
+      (m) => m === model || m.toLowerCase() === model.toLowerCase()
+    );
+    if (!modelExists) {
+      console.error(
+        `❌ ERROR: Configured model "${model}" was NOT found in your Gemini account!`
+      );
+      console.error(
+        `   Please change GEMINI_MODEL in .env.local to one of: ${availableModels.slice(0, 8).join(', ')}`
+      );
+      return false;
+    }
+    console.log(`  [Model Verified]: "${model}" exists and is accessible in your Google account.`);
+  } catch (err: any) {
+    console.error(`❌ Network error contacting Gemini models list:`, err.message);
+    return false;
+  }
+
+  // Step 2: Execute live generation call
   const url = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
   const start = Date.now();
 
@@ -92,7 +133,7 @@ async function testGemini(): Promise<boolean> {
 
 async function testGrok(): Promise<boolean> {
   const apiKey = process.env.XAI_API_KEY;
-  console.log('\n--- 2. Testing Grok / xAI Provider ---');
+  console.log('\n--- 2. Testing Grok / xAI Provider & Models Discovery ---');
   if (!apiKey || apiKey === 'your_xai_grok_api_key_here') {
     console.log('⚠️ XAI_API_KEY is not set in environment or .env.local.');
     console.log('  To test live Grok calls, add XAI_API_KEY=<your-key> to .env.local');
@@ -100,6 +141,40 @@ async function testGrok(): Promise<boolean> {
   }
 
   const model = process.env.XAI_MODEL || 'grok-2-latest';
+
+  // Step 1: Call xAI models endpoint
+  console.log('  [Models Endpoint]: Querying xAI /v1/models endpoint...');
+  try {
+    const listRes = await fetch('https://api.x.ai/v1/models', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (!listRes.ok) {
+      const err = await listRes.text();
+      console.error(`❌ Failed to query xAI models endpoint (${listRes.status}): ${err}`);
+      return false;
+    }
+    const listData = await listRes.json();
+    const availableModels = (listData.data || []).map((m: any) => m.id);
+    console.log(`  [Models Endpoint]: Account has models: ${availableModels.join(', ')}`);
+
+    const modelExists = availableModels.some((m: string) => m === model);
+    if (!modelExists) {
+      console.error(
+        `❌ ERROR: Configured model "${model}" was NOT found in your xAI account!`
+      );
+      console.error(
+        `   Please change XAI_MODEL in .env.local to one of: ${availableModels.join(', ')}`
+      );
+      return false;
+    }
+    console.log(`  [Model Verified]: "${model}" exists and is accessible in your xAI account.`);
+  } catch (err: any) {
+    console.error(`❌ Network error contacting xAI models list:`, err.message);
+    return false;
+  }
+
+  // Step 2: Execute live generation call
   const url = 'https://api.x.ai/v1/chat/completions';
   const start = Date.now();
 

@@ -72,15 +72,62 @@ async function runOwnerTests() {
     }
   }
 
-  // 1. Owner Auth & Security
-  await testCase('Owner Auth: owner password defaults to owner123 and signed cookies work', async () => {
-    const isInvalid = await verifySessionToken('malformed.token.signature');
-    if (isInvalid) throw new Error('Malformed token was accepted!');
+  // 1. Owner Auth & Security: Strict rejection when secrets missing, 503 check, and HMAC verification
+  await testCase('Owner Auth: login fails with 503 when variables are unset, succeeds when configured', async () => {
+    const { POST: loginPost } = await import('../src/app/api/owner/login/route');
+    const { NextRequest } = await import('next/server');
+
+    // Save previous env if any
+    const savedPassword = process.env.OWNER_PASSWORD;
+    const savedSecret = process.env.SESSION_SECRET;
+
+    // Test 1A: Both unset -> must return 503
+    delete process.env.OWNER_PASSWORD;
+    delete process.env.SESSION_SECRET;
+
+    const reqUnset = new NextRequest('http://localhost:3000/api/owner/login', {
+      method: 'POST',
+      body: JSON.stringify({ password: 'test' }),
+    });
+    const resUnset = await loginPost(reqUnset);
+    if (resUnset.status !== 503) {
+      throw new Error(`Expected HTTP 503 when variables unset, got: ${resUnset.status}`);
+    }
+
+    // Test 1B: Verify no hardcoded secrets in src/lib/auth.ts
+    const authCode = fs.readFileSync(path.resolve(process.cwd(), 'src/lib/auth.ts'), 'utf8');
+    if (authCode.includes('owner123') || authCode.includes('clinic-owner') || authCode.includes('default_session')) {
+      throw new Error('Security Violation: Found hardcoded fallback password/secret in src/lib/auth.ts!');
+    }
+
+    // Test 1C: Configure test credentials in environment
+    process.env.OWNER_PASSWORD = 'test_owner_secret_999';
+    process.env.SESSION_SECRET = 'test_session_secret_signing_key_999';
+
+    // Wrong password -> 401
+    const reqWrong = new NextRequest('http://localhost:3000/api/owner/login', {
+      method: 'POST',
+      body: JSON.stringify({ password: 'wrong_password' }),
+    });
+    const resWrong = await loginPost(reqWrong);
+    if (resWrong.status !== 401) {
+      throw new Error(`Expected HTTP 401 for wrong password, got: ${resWrong.status}`);
+    }
+
+    // Correct password -> 200
+    const reqCorrect = new NextRequest('http://localhost:3000/api/owner/login', {
+      method: 'POST',
+      body: JSON.stringify({ password: 'test_owner_secret_999' }),
+    });
+    const resCorrect = await loginPost(reqCorrect);
+    if (resCorrect.status !== 200) {
+      throw new Error(`Expected HTTP 200 for correct password, got: ${resCorrect.status}`);
+    }
 
     const token = await createSessionToken();
     const isValid = await verifySessionToken(token);
     if (!isValid) throw new Error('HMAC-SHA256 signed session token failed verification!');
-    console.log('  [Auth]: Verified HMAC-SHA256 cookie signing and default password configuration.');
+    console.log('  [Auth]: Verified 503 on unset env, 401 on wrong password, 200 on correct password, and HMAC-SHA256 cookie signing.');
   });
 
   // 2. HTTP-Level Route Protection (Middleware assertions for every owner endpoint)

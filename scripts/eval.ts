@@ -371,7 +371,7 @@ A key innovation of Local Business Assistant is the ability for non-technical bu
 ## 5. Dual LLM Provider Architecture & Failover
 
 The orchestrator sits behind an abstract provider interface with active circuit breakers and failovers:
-- **Primary:** Google Gemini (\`gemini-1.5-flash\` / \`gemini-2.0-flash\`)
+- **Primary:** Google Gemini (\`gemini-2.5-flash\`)
 - **Secondary Backup:** xAI Grok (\`grok-2-latest\`)
 - **Deterministic Offline Core:** Slot filling, relative date parsing, availability checks, and keyword safety guardrails remain 100% operational even during complete cloud network outages.
 

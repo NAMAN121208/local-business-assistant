@@ -1,10 +1,25 @@
 // src/app/api/owner/login/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { getOwnerPassword, setSessionCookie } from '@/lib/auth';
+import { getOwnerPassword, getSessionSecret, setSessionCookie } from '@/lib/auth';
 
 export async function POST(req: NextRequest) {
   try {
     const correctPassword = getOwnerPassword();
+    const sessionSecret = getSessionSecret();
+
+    if (!correctPassword || !sessionSecret) {
+      console.error(
+        '[AUTH CONFIG ERROR] Owner console login disabled: OWNER_PASSWORD and/or SESSION_SECRET environment variables are missing.'
+      );
+      return NextResponse.json(
+        {
+          error:
+            'OWNER_PASSWORD and SESSION_SECRET environment variables must be configured on the server.',
+        },
+        { status: 503 }
+      );
+    }
+
     const body = await req.json().catch(() => ({}));
     const { password } = body;
 

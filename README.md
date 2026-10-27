@@ -88,7 +88,7 @@ flowchart TD
 ```
 
 ### Dual LLM Provider Failover Architecture
-- **Primary:** Google Gemini (`gemini-1.5-flash` / `gemini-2.0-flash`) via OpenAI-compatible endpoint.
+- **Primary:** Google Gemini (`gemini-2.5-flash`) via OpenAI-compatible endpoint.
 - **Secondary Backup:** xAI Grok (`grok-2-latest`).
 - **Resilience Strategy:**
   1. Exponential backoff retry once on 429, 5xx, timeout, or schema failure.
@@ -175,12 +175,12 @@ To deploy to Vercel, configure these environment variables in your Vercel Projec
 | `SUPABASE_URL` | **Required for Live DB** | Supabase Postgres REST endpoint | None |
 | `SUPABASE_SERVICE_ROLE_KEY` | **Required for Live DB** | Supabase service key for server-side persistence | None |
 | `SUPABASE_ANON_KEY` | Optional | Supabase anon key (fallback if service key omitted) | None |
-| `SESSION_SECRET` | **Recommended** | Dedicated 256-bit secret used strictly for HMAC-SHA256 cookie signing | Cryptographic server key |
-| `OWNER_PASSWORD` | Optional | Human password to log into `/owner/login` | `owner123` (demo default for judges) |
+| `SESSION_SECRET` | **Required in Production** | Dedicated 256-bit secret used strictly for HMAC-SHA256 cookie signing | None (Must be configured in env) |
+| `OWNER_PASSWORD` | **Required in Production** | Human password to log into `/owner/login` | None (Must be configured in env) |
 | `XAI_API_KEY` | Optional | Secondary backup provider (xAI Grok) for automatic failover | None |
 | `PRIMARY_PROVIDER` | Optional | Default provider to attempt first | `gemini` |
-| `GEMINI_MODEL` | Optional | Model identifier for Gemini | `gemini-1.5-flash` |
-| `XAI_MODEL` | Optional | Model identifier for Grok | `grok-2-latest` |
+| `GEMINI_MODEL` | **Check with Account** | Model identifier for Gemini (must verify with account models endpoint) | `gemini-2.5-flash` |
+| `XAI_MODEL` | **Check with Account** | Model identifier for Grok (must verify with account models endpoint) | `grok-2-latest` |
 | `USE_MEMORY_DB` | Dev Only | Set to `true` only for offline development without Supabase | `false` |
 
 ### 🔐 Security Architecture: SESSION_SECRET vs. OWNER_PASSWORD

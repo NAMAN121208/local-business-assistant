@@ -5,19 +5,19 @@ export const COOKIE_NAME = 'lba_owner_session';
 const SESSION_MAX_AGE = 60 * 60 * 24 * 7; // 7 days in seconds
 
 /**
- * Returns owner password from environment, with default 'owner123'
- * for seamless judge & demo evaluation.
+ * Returns owner password strictly from environment variable OWNER_PASSWORD.
+ * Refuses any hard-coded default.
  */
 export function getOwnerPassword(): string {
-  return process.env.OWNER_PASSWORD || 'owner123';
+  return process.env.OWNER_PASSWORD || '';
 }
 
 /**
- * Returns the secret used to HMAC-sign session cookies.
- * Uses SESSION_SECRET if set, separate from OWNER_PASSWORD.
+ * Returns the secret used to HMAC-sign session cookies strictly from SESSION_SECRET.
+ * Refuses any hard-coded default.
  */
 export function getSessionSecret(): string {
-  return process.env.SESSION_SECRET || 'lba_default_session_signing_secret_hmac_2026';
+  return process.env.SESSION_SECRET || '';
 }
 
 async function getHmacKey(secret: string): Promise<CryptoKey> {
@@ -42,6 +42,9 @@ function bufferToHex(buf: ArrayBuffer): string {
 
 export async function createSessionToken(): Promise<string> {
   const secret = getSessionSecret();
+  if (!secret) {
+    throw new Error('SESSION_SECRET environment variable is missing.');
+  }
   const timestamp = Date.now().toString();
   const key = await getHmacKey(secret);
   const signatureBuffer = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(timestamp));
@@ -51,6 +54,8 @@ export async function createSessionToken(): Promise<string> {
 
 export async function verifySessionToken(token?: string | null): Promise<boolean> {
   if (!token) return false;
+  const secret = getSessionSecret();
+  if (!secret) return false;
   const parts = token.split('.');
   if (parts.length !== 2) return false;
 
@@ -63,7 +68,6 @@ export async function verifySessionToken(token?: string | null): Promise<boolean
     return false;
   }
 
-  const secret = getSessionSecret();
   const key = await getHmacKey(secret);
   const expectedSigBuffer = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(timestampStr));
   const expectedSignatureHex = bufferToHex(expectedSigBuffer);

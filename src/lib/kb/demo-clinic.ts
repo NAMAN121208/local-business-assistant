@@ -95,6 +95,14 @@ export const demoClinicKBContent: KnowledgeBaseContent = {
       ],
     },
     {
+      id: 'faq_parking',
+      question: 'Is parking available at or near the clinic?',
+      answer:
+        'Dedicated two-wheeler parking is available directly in front of the clinic. For four-wheelers and cars, street parking is available along 7th Cross.',
+      category: 'facilities',
+      keywords: ['parking', 'car', 'four-wheeler', 'two-wheeler', 'vehicle', 'park', 'four wheeler'],
+    },
+    {
       id: 'faq_doctors',
       question: 'Which doctors are available at the clinic?',
       answer:

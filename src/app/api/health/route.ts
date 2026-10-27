@@ -18,8 +18,44 @@ export async function GET() {
 
   const supabaseConfigured = Boolean(
     process.env.SUPABASE_URL &&
-    process.env.SUPABASE_URL !== 'https://your-project-id.supabase.co' &&
+    !process.env.SUPABASE_URL.includes('your-project-id') &&
     (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY)
+  );
+
+  let supabaseConnected = false;
+  let supabaseLatencyMs: number | null = null;
+  let supabaseError: string | null = null;
+
+  if (supabaseConfigured && process.env.USE_MEMORY_DB !== 'true') {
+    try {
+      const start = Date.now();
+      const { createClient } = await import('@supabase/supabase-js');
+      const supabaseUrl = process.env.SUPABASE_URL!;
+      const supabaseKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY)!;
+      const client = createClient(supabaseUrl, supabaseKey);
+
+      const queryPromise = client.from('Business').select('id').limit(1);
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Supabase ping timed out (2000ms)')), 2000)
+      );
+
+      const res: any = await Promise.race([queryPromise, timeoutPromise]);
+      if (res?.error) {
+        supabaseError = res.error.message;
+      } else {
+        supabaseConnected = true;
+        supabaseLatencyMs = Date.now() - start;
+      }
+    } catch (err: any) {
+      supabaseError = err.message || 'Supabase connectivity check failed';
+    }
+  }
+
+  const ownerPasswordConfigured = Boolean(
+    process.env.OWNER_PASSWORD && process.env.OWNER_PASSWORD.trim().length > 0
+  );
+  const sessionSecretConfigured = Boolean(
+    process.env.SESSION_SECRET && process.env.SESSION_SECRET.trim().length > 0
   );
 
   return NextResponse.json({
@@ -36,20 +72,24 @@ export async function GET() {
     llm: {
       primaryProvider: process.env.PRIMARY_PROVIDER || 'gemini',
       geminiConfigured,
-      geminiModel: process.env.GEMINI_MODEL || 'gemini-1.5-flash',
+      geminiModel: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
       grokConfigured,
       grokModel: process.env.XAI_MODEL || 'grok-2-latest',
       circuitBreakerEnabled: true,
       failoverEnabled: true,
     },
     database: {
-      mode: supabaseConfigured ? 'supabase_postgres' : 'in_memory_store',
+      mode: supabaseConnected ? 'supabase_postgres' : 'in_memory_store',
       supabaseConfigured,
+      supabaseConnected,
+      supabaseLatencyMs,
+      supabaseError,
     },
     ownerConsole: {
-      protected: true,
+      ownerPasswordConfigured,
+      sessionSecretConfigured,
+      loginReady: ownerPasswordConfigured && sessionSecretConfigured,
       authMethod: 'signed_cookie_hmac_sha256',
-      voiceSetupSupported: true,
     },
   });
 }

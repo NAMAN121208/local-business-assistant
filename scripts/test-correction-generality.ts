@@ -106,7 +106,31 @@ async function testCorrectionGenerality() {
   if (!replayB.text.includes('Dental Cleaning') || !replayB.text.includes('800')) {
     throw new Error(`Test B Failed: Replay answer did not mention Dental Cleaning and ₹800! Got: "${replayB.text}"`);
   }
-  console.log('✅ Test B Passed: Service added, 30 mins & ₹800 verified, address hallucination reverted.\n');
+
+  // End-to-End Booking of the newly added service
+  console.log('  [End-to-End Booking Flow for Newly Added Service: Dental Cleaning]');
+  const dentalConvId = `dental_booking_test_${Date.now()}`;
+  const bookStep1 = await processMessage({
+    businessId: DEMO_CLINIC_ID,
+    conversationId: dentalConvId,
+    text: 'Can I book an appointment for dental cleaning tomorrow morning?',
+  });
+  console.log(`  Step 1 Slot Inquiry Reply: "${bookStep1.text}"`);
+  if (bookStep1.decision !== 'act' || !bookStep1.text.includes('Dental Cleaning')) {
+    throw new Error(`Test B Failed: Booking Step 1 did not act on Dental Cleaning! Got: "${bookStep1.text}"`);
+  }
+
+  const bookStep2 = await processMessage({
+    businessId: DEMO_CLINIC_ID,
+    conversationId: dentalConvId,
+    text: 'Yes please confirm 10:00 AM',
+  });
+  console.log(`  Step 2 Confirmation Reply: "${bookStep2.text}"`);
+  if (bookStep2.decision !== 'act' || !bookStep2.text.includes('Dental Cleaning') || !bookStep2.text.includes('BK_')) {
+    throw new Error(`Test B Failed: Booking Step 2 did not confirm Dental Cleaning with booking ID! Got: "${bookStep2.text}"`);
+  }
+  console.log('  ✅ End-to-End Booking Passed: Customer successfully booked newly added Dental Cleaning service in DB!');
+  console.log('✅ Test B Passed: Service added, 30 mins & ₹800 verified, address hallucination reverted, booked end-to-end.\n');
 
 
   // Test Correction C: "Never discuss pricing over chat, ask them to call"
@@ -153,8 +177,48 @@ async function testCorrectionGenerality() {
   }
   console.log('✅ Test C Passed: Pricing prohibition enforced, medical safety preserved, call prompt returned.\n');
 
-  console.log('====================================================');
-  console.log('🎉 ALL 3 GENERAL CORRECTION TESTS PASSED PERFECTLY!');
+  // Test D: Live LLM End-to-End Correction Generation (Only runs when keys are present)
+  console.log('--- TEST D: Live LLM Correction Generation (Cloud Provider) ---');
+  const hasLiveLLMKeys = Boolean(
+    (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'your_gemini_api_key_here') ||
+    (process.env.XAI_API_KEY && process.env.XAI_API_KEY !== 'your_xai_grok_api_key_here')
+  );
+
+  if (hasLiveLLMKeys) {
+    console.log('  [Live LLM]: External API keys detected. Calling live LLM endpoint for correction...');
+    const { callLLM } = await import('../src/lib/llm');
+    const { KnowledgeBaseContentSchema } = await import('../src/lib/kb/voice-setup');
+
+    const liveCorrectionText = 'We added a Physiotherapy consultation, 45 minutes, 1200 rupees';
+    const systemPrompt = `You are a knowledge-engineering assistant updating an existing business knowledge base for City Health Clinic.
+Update ONLY the services array and FAQs for the new service mentioned. Output valid JSON matching the schema.
+CURRENT KB: ${JSON.stringify(constrainedC)}`;
+
+    const liveRes = await callLLM({
+      systemPrompt,
+      messages: [{ role: 'user', content: `Owner Correction: "${liveCorrectionText}"` }],
+      temperature: 0.1,
+    });
+
+    console.log(`  [Live LLM Provider]: ${liveRes.provider}`);
+    const parsed = JSON.parse(liveRes.reply_text);
+    const validated = KnowledgeBaseContentSchema.parse(parsed);
+    const { constrainedContent: liveConstrained } = validateAndConstrainCorrection(
+      liveCorrectionText,
+      constrainedC,
+      validated
+    );
+    const hasPhysio = liveConstrained.services.some((s) => s.name.toLowerCase().includes('physio'));
+    if (!hasPhysio) throw new Error('Live LLM correction failed: Physiotherapy was not added to services!');
+    console.log('✅ Test D Passed: Live LLM successfully generated structured KB update with Physiotherapy!');
+  } else {
+    console.log('ℹ️ Test D (Live LLM Provider Call): SKIPPED — No live GEMINI_API_KEY or XAI_API_KEY present.');
+    console.log('  (Tests A, B, and C used the deterministic applySemanticCorrectionFallback parser.)');
+    console.log('  To test live LLM parsing, set GEMINI_API_KEY in .env.local and re-run.');
+  }
+
+  console.log('\n====================================================');
+  console.log('🎉 CORRECTION GENERALITY SUITE COMPLETED SUCCESSFULLY!');
   console.log('====================================================');
 }
 

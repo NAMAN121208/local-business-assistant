@@ -29,6 +29,62 @@ export interface ProcessMessageParams {
   text: string;
 }
 
+function isComplaintOrEscalation(text: string): { isEscalation: boolean; reason?: string; reply?: string } {
+  const lower = text.toLowerCase();
+
+  // 1. Direct Human / Manager Escalation Demand
+  if (
+    /\b(speak|talk|connect|transfer|call)\b.*?\b(manager|owner|human|staff|person|agent|head doctor|director)\b/i.test(lower) ||
+    /\b(talk to human|speak to human|real person|human agent|call me back)\b/i.test(lower) ||
+    /\b(baat karwao|manager se baat|doctor se baat karni)\b/i.test(lower)
+  ) {
+    return {
+      isEscalation: true,
+      reason: 'Customer requested direct human or clinic manager escalation',
+      reply: 'I have flagged your request for our clinic manager and head staff. A team member will contact you shortly. For immediate urgent assistance, you may also reach our front desk directly at +91 98765 43210.',
+    };
+  }
+
+  // 2. Complaints regarding staff conduct, delays, wait times, cleanliness
+  if (
+    /\b(rude|unprofessional|terrible|horrible|worst|disgusting|angry|useless|waste|pathetic)\b/i.test(lower) ||
+    /\b(waiting\s+room|receptionist|staff|nurse)\b.*?\b(rude|noisy|dirty|bad|delayed|waiting|kept me)\b/i.test(lower) ||
+    /\b(arrived|came|waited)\b.*?\b(late|hour late|hours late|delayed)\b/i.test(lower) ||
+    /\b(shikayat|ganda|kharab|shor|deri|bekar)\b/i.test(lower)
+  ) {
+    return {
+      isEscalation: true,
+      reason: 'Customer submitted a complaint regarding staff conduct, delays, or clinic environment',
+      reply: 'We sincerely apologise for your experience at City Health Clinic. We take patient feedback very seriously. Your concern has been escalated directly to clinic management for review and follow-up.',
+    };
+  }
+
+  // 3. Discount bargaining & custom price negotiations
+  if (
+    /\b(discount|bargain|reduce\s+fee|concession|kam\s+karo|kam\s+kariye|kamti|kam\s+hoga|kamti\s+madi)\b/i.test(lower) ||
+    /\b(\d+%\s*discount|cheaper|offer\s+code)\b/i.test(lower)
+  ) {
+    return {
+      isEscalation: true,
+      reason: 'Customer requested custom discount or price negotiation (violates standard billing policy)',
+      reply: 'City Health Clinic consultation and service fees are standardized, and custom discounts cannot be negotiated over chat. Your inquiry has been noted for our administrative desk.',
+    };
+  }
+
+  // 4. Legal notice or dispute threats
+  if (
+    /\b(legal\s+notice|sue|lawyer|court|police|dispute|fraud|consumer\s+court)\b/i.test(lower)
+  ) {
+    return {
+      isEscalation: true,
+      reason: 'Customer threatened legal dispute or formal action',
+      reply: 'We have logged your communication regarding this dispute. It has been escalated directly to clinic administration and management for formal review.',
+    };
+  }
+
+  return { isEscalation: false };
+}
+
 export async function processMessage(params: {
   businessId: string;
   channel?: string;
@@ -213,6 +269,45 @@ export async function processMessage(params: {
     };
   }
 
+  // 6.5 Deterministic Escalation & Complaint Pre-Router
+  const complaintCheck = isComplaintOrEscalation(userText);
+  if (complaintCheck.isEscalation) {
+    const escReply =
+      complaintCheck.reply ||
+      getLocalizedTemplate('safe_fallback', dialect);
+
+    await db.createEscalation({
+      conversation_id: convId,
+      reason: complaintCheck.reason || 'Escalation triggered by customer inquiry',
+      ai_summary: `Customer message: "${userText.slice(0, 100)}..."`,
+      suggested_reply: escReply,
+      status: 'open',
+    });
+
+    await db.updateConversationStatus(convId, 'needs_human');
+
+    await db.createMessage({
+      conversation_id: convId,
+      sender: 'bot',
+      text: escReply,
+      language: langDetection.language,
+      intent: 'complaint',
+      decision: 'escalate',
+      confidence: 1.0,
+      kb_refs: ['escalation_rules'],
+      provider: 'deterministic_guardrail',
+    });
+
+    return {
+      conversationId: convId,
+      text: escReply,
+      decision: 'escalate',
+      intent: 'complaint',
+      provider: 'deterministic_guardrail',
+      quickReplies: ['Talk to Staff', 'Clinic Timings', 'Emergency Contact'],
+    };
+  }
+
   // 7. Deterministic Multilingual Booking Engine & Slot Filling
   const lower = userText.toLowerCase();
   const history = await db.getRecentMessages(convId, 8);
@@ -225,9 +320,28 @@ export async function processMessage(params: {
   const timeWindow = parseTimeWindow(userText);
 
   if (isBookingQuery && targetDate) {
+    const matchedService =
+      kbData.services.find((s) => {
+        const sLower = s.name.toLowerCase();
+        return (
+          lower.includes(sLower) ||
+          sLower
+            .split(/\s+/)
+            .some((w: string) => w.length > 4 && lower.includes(w) && w !== 'consultation' && w !== 'checkup')
+        );
+      }) ||
+      kbData.services[0] || {
+        id: 'service_general',
+        name: 'General Physician Consultation',
+        duration_mins: 30,
+        price: 500,
+      };
+
+    const serviceName = matchedService.name;
+
     const avail = await checkAvailability({
       businessId,
-      service: 'General Physician Consultation',
+      service: serviceName,
       dateStr: targetDate,
       timeWindow,
     });
@@ -237,12 +351,13 @@ export async function processMessage(params: {
 
     if (avail.available && avail.slots.length > 0) {
       const slotList = avail.slots.map((s) => s.time).join(', ');
+      const windowDesc = `${timeWindow === 'any' ? 'OPD hours' : timeWindow} for ${serviceName}${matchedService.price ? ` (₹${matchedService.price})` : ''}`;
       replyText = getLocalizedTemplate('booking_slot_options', dialect, {
         date: avail.date,
-        timeWindow: timeWindow === 'any' ? 'OPD hours' : timeWindow,
+        timeWindow: windowDesc,
         slots: slotList,
       });
-      quickReplies = avail.slots.map((s) => `Confirm ${s.time} on ${avail.date}`);
+      quickReplies = avail.slots.map((s) => `Confirm ${s.time} on ${avail.date} (${serviceName})`);
     } else {
       replyText =
         avail.reason ||
@@ -294,10 +409,29 @@ export async function processMessage(params: {
       lastBotMsg?.text.match(/(\d{1,2}:\d{2}\s*(?:am|pm))/i);
     const chosenTime = slotTimeMatch ? slotTimeMatch[1] : '10:00 AM';
 
+    // Exact full service name match takes priority over partial words
+    const matchedService =
+      kbData.services.find((s) => {
+        const sLower = s.name.toLowerCase();
+        return (
+          lastBotMsg?.text.toLowerCase().includes(sLower) ||
+          userText.toLowerCase().includes(sLower)
+        );
+      }) ||
+      kbData.services.find((s) => {
+        const sLower = s.name.toLowerCase();
+        return sLower
+          .split(/\s+/)
+          .some((w: string) => w.length > 4 && lastBotMsg?.text.toLowerCase().includes(w) && w !== 'consultation' && w !== 'checkup');
+      }) ||
+      kbData.services[0] || {
+        name: 'General Physician Consultation',
+      };
+
     const booking = await confirmBooking({
       businessId,
       customerId,
-      service: 'General Physician Consultation (Dr. Sneha Rao)',
+      service: matchedService.name,
       startTimeIso: `${bookingDate}T10:00:00.000Z`,
       endTimeIso: `${bookingDate}T10:30:00.000Z`,
       notes: `Booked via Web Chat for ${senderName || 'Patient'}`,
@@ -305,7 +439,7 @@ export async function processMessage(params: {
 
     const confirmedReply = getLocalizedTemplate('booking_confirmed', dialect, {
       id: booking.id.toUpperCase(),
-      service: 'General Physician Consultation (Dr. Sneha Rao)',
+      service: matchedService.name,
       date: bookingDate,
       time: chosenTime,
       location: 'City Health Clinic, 42 1st Main, Indiranagar',
