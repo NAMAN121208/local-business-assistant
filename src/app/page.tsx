@@ -208,19 +208,27 @@ export default function CustomerChatPage() {
         </div>
       </header>
 
-      {/* Safety Notice or Human Escalation Banner */}
-      {convStatus === 'needs_human' ? (
+      {/* Safety Notice Banner */}
+      <div className="bg-amber-50 border-b border-amber-200 px-3 py-1.5 text-[11px] text-amber-900 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 truncate">
+          <ShieldAlert className="w-3.5 h-3.5 text-amber-700 flex-shrink-0" />
+          <span className="truncate">
+            <strong>Notice:</strong> Demo clinic with sample data. Please don&apos;t enter real personal or medical information.
+          </span>
+        </div>
+        <a
+          href="/guide"
+          className="text-teal-700 hover:text-teal-900 underline font-semibold flex-shrink-0"
+        >
+          Judge Guide →
+        </a>
+      </div>
+
+      {convStatus === 'needs_human' && (
         <div className="bg-amber-100 border-b border-amber-300 px-3 py-2 text-xs text-amber-900 flex items-center gap-2">
           <UserCheck className="w-4 h-4 text-amber-700 flex-shrink-0 animate-pulse" />
           <span>
             <strong>Clinic Staff Alerted:</strong> A member of Dr. Sneha Rao&apos;s team is reviewing your conversation and will reply directly here.
-          </span>
-        </div>
-      ) : (
-        <div className="bg-amber-50 border-b border-amber-200 px-3 py-1.5 text-[11px] text-amber-800 flex items-center gap-1.5">
-          <ShieldAlert className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
-          <span>
-            <strong>Clinic Logistics & Appointments Only.</strong> For medical emergencies, call +91 98765 99999.
           </span>
         </div>
       )}
@@ -341,6 +349,7 @@ export default function CustomerChatPage() {
           <input
             type="text"
             value={inputText}
+            maxLength={500}
             onChange={(e) => setInputText(e.target.value)}
             placeholder="Type or voice dictate your message..."
             className="flex-1 bg-slate-100 text-slate-900 border border-slate-300 rounded-full px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:bg-white transition"
@@ -348,7 +357,7 @@ export default function CustomerChatPage() {
           />
           <button
             type="submit"
-            disabled={loading || !inputText.trim()}
+            disabled={loading || !inputText.trim() || inputText.length > 500}
             className="w-10 h-10 rounded-full bg-teal-600 hover:bg-teal-700 disabled:opacity-40 text-white flex items-center justify-center transition shadow-sm flex-shrink-0"
             aria-label="Send message"
           >
@@ -356,10 +365,22 @@ export default function CustomerChatPage() {
           </button>
         </form>
         <div className="flex items-center justify-between text-[10px] text-slate-400 mt-1.5 px-1">
-          <span>Wispr Flow Dictation Ready</span>
-          <a href="/owner/login" className="hover:text-teal-600 hover:underline">
-            Owner Portal →
-          </a>
+          <div className="flex items-center gap-2">
+            <span>Wispr Flow Dictation Ready</span>
+            {inputText.length > 350 && (
+              <span className={inputText.length >= 480 ? 'text-rose-500 font-bold' : 'text-slate-400'}>
+                {inputText.length}/500
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-3">
+            <a href="/guide" className="hover:text-teal-600 hover:underline">
+              Guide
+            </a>
+            <a href="/owner/login" className="hover:text-teal-600 hover:underline">
+              Owner Portal →
+            </a>
+          </div>
         </div>
       </footer>
     </div>

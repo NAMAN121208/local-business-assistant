@@ -4,6 +4,33 @@ import { webChatAdapter } from '@/lib/channels';
 import { DEMO_CLINIC_ID, demoClinicBusiness } from '@/lib/kb/demo-clinic';
 import { db } from '@/lib/db';
 import { initKnowledgeBase } from '@/lib/kb';
+import { detectLanguage } from '@/lib/locale/detector';
+import { getLocalizedTemplate } from '@/lib/locale/templates';
+
+// In-memory sliding window rate limiter: 20 messages per minute per IP
+interface RateLimitRecord {
+  timestamps: number[];
+}
+const ipRateLimits = new Map<string, RateLimitRecord>();
+
+function isRateLimited(ip: string, limit: number = 20, windowMs: number = 60000): boolean {
+  const now = Date.now();
+  let record = ipRateLimits.get(ip);
+  if (!record) {
+    record = { timestamps: [] };
+    ipRateLimits.set(ip, record);
+  }
+
+  // Filter timestamps within window
+  record.timestamps = record.timestamps.filter((ts) => now - ts < windowMs);
+
+  if (record.timestamps.length >= limit) {
+    return true;
+  }
+
+  record.timestamps.push(now);
+  return false;
+}
 
 export async function GET(req: NextRequest) {
   await initKnowledgeBase();
@@ -38,11 +65,44 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     await initKnowledgeBase();
-    const body = await req.json();
+
+    // 1. Abuse Protection: Rate Limiting
+    const forwarded = req.headers.get('x-forwarded-for');
+    const clientIp = forwarded ? forwarded.split(',')[0].trim() : '127.0.0.1';
+
+    if (isRateLimited(clientIp, 20, 60000)) {
+      return NextResponse.json(
+        {
+          error: 'Rate limit exceeded',
+          text: getLocalizedTemplate('rate_limit_exceeded', 'en'),
+          decision: 'escalate',
+          provider: 'abuse_protection_ratelimit',
+        },
+        { status: 429 }
+      );
+    }
+
+    const body = await req.json().catch(() => ({}));
     const { text, conversationId, customerId, senderName, senderContact } = body;
 
+    // 2. Abuse Protection: Empty Message Validation
     if (!text || typeof text !== 'string' || !text.trim()) {
-      return NextResponse.json({ error: 'Text message is required' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Empty message ignored. Please provide text.' },
+        { status: 400 }
+      );
+    }
+
+    const trimmedText = text.trim();
+
+    // 3. Abuse Protection: Character Cap (500 chars max)
+    if (trimmedText.length > 500) {
+      return NextResponse.json(
+        {
+          error: 'Message exceeds 500 characters limit. Please shorten your message.',
+        },
+        { status: 400 }
+      );
     }
 
     const response = await webChatAdapter.receive({
@@ -52,7 +112,7 @@ export async function POST(req: NextRequest) {
       customerId,
       senderName,
       senderContact,
-      text: text.trim(),
+      text: trimmedText,
     });
 
     return NextResponse.json(response);
