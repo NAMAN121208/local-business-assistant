@@ -161,6 +161,7 @@ export function parseTimeWindow(text: string): 'morning' | 'evening' | 'any' {
   const eveningTerms = [
     'evening', 'shaam', 'sham', 'dopahar', 'raat', 'शाम', 'दोपहर', 'रात',
     'sanje', 'sanjege', 'madhyahna', 'raatri', 'ಸಂಜೆ', 'ಮಧ್ಯಾಹ್ನ', 'ರಾತ್ರಿ',
+    'after lunch', 'post lunch', 'afternoon', 'lunch',
     '4pm', '5pm', '6pm', '7pm', '8pm'
   ];
   if (eveningTerms.some((t) => lower.includes(t))) {

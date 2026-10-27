@@ -14,10 +14,10 @@ export function getOwnerPassword(): string {
 
 /**
  * Returns the secret used to HMAC-sign session cookies.
- * Uses SESSION_SECRET if set, otherwise falls back to OWNER_PASSWORD.
+ * Uses SESSION_SECRET if set, separate from OWNER_PASSWORD.
  */
 export function getSessionSecret(): string {
-  return process.env.SESSION_SECRET || process.env.OWNER_PASSWORD || 'owner123_session_secret_signing_key';
+  return process.env.SESSION_SECRET || 'lba_default_session_signing_secret_hmac_2026';
 }
 
 async function getHmacKey(secret: string): Promise<CryptoKey> {

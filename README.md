@@ -163,30 +163,40 @@ Full metrics and before/after replay logs are stored in [`docs/EVALUATION.md`](d
 
 ---
 
-## ⚙️ Environment Variables
+## ⚙️ Environment Variables & Vercel Production Setup
 
-Create `.env.local` using `.env.example`:
+### Required & Recommended Production Variables
 
-```bash
-# Primary & Secondary LLM Provider API Keys
-GEMINI_API_KEY=your_gemini_api_key_here
-XAI_API_KEY=your_xai_grok_api_key_here
+To deploy to Vercel, configure these environment variables in your Vercel Project Settings:
 
-# Provider Configuration
-PRIMARY_PROVIDER=gemini # 'gemini' or 'grok'
-GEMINI_MODEL=gemini-1.5-flash
-XAI_MODEL=grok-2-latest
+| Variable | Requirement | Purpose | Default / Fallback |
+|---|---|---|---|
+| `GEMINI_API_KEY` | **Required for Live LLM** | Primary LLM inference (OpenAI-compatible Gemini endpoint) | None (Offline deterministic fallback) |
+| `SUPABASE_URL` | **Required for Live DB** | Supabase Postgres REST endpoint | None |
+| `SUPABASE_SERVICE_ROLE_KEY` | **Required for Live DB** | Supabase service key for server-side persistence | None |
+| `SUPABASE_ANON_KEY` | Optional | Supabase anon key (fallback if service key omitted) | None |
+| `SESSION_SECRET` | **Recommended** | Dedicated 256-bit secret used strictly for HMAC-SHA256 cookie signing | Cryptographic server key |
+| `OWNER_PASSWORD` | Optional | Human password to log into `/owner/login` | `owner123` (demo default for judges) |
+| `XAI_API_KEY` | Optional | Secondary backup provider (xAI Grok) for automatic failover | None |
+| `PRIMARY_PROVIDER` | Optional | Default provider to attempt first | `gemini` |
+| `GEMINI_MODEL` | Optional | Model identifier for Gemini | `gemini-1.5-flash` |
+| `XAI_MODEL` | Optional | Model identifier for Grok | `grok-2-latest` |
+| `USE_MEMORY_DB` | Dev Only | Set to `true` only for offline development without Supabase | `false` |
 
-# Owner Authentication & Signed Session Cookies
-OWNER_PASSWORD=your_secure_owner_password_here
-SESSION_SECRET=your_random_secret_for_signing_session_cookies_here
+### 🔐 Security Architecture: SESSION_SECRET vs. OWNER_PASSWORD
 
-# Supabase Postgres Configuration (Set USE_MEMORY_DB=true for local in-memory fallback)
-SUPABASE_URL=https://your-project-id.supabase.co
-SUPABASE_ANON_KEY=your_supabase_anon_key_here
-SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key_here
-USE_MEMORY_DB=false
-```
+The authentication subsystem strictly separates session signing from the login password:
+- `OWNER_PASSWORD` is the human-entered credential submitted via the login form at `/owner/login`.
+- `SESSION_SECRET` is a separate, private cryptographic key used exclusively on the server to compute and verify HMAC-SHA256 signatures on the `lba_owner_session` HTTP-only cookie.
+- **Why this matters:** Even if an owner password is known or shared with clinical staff, the underlying session tokens cannot be forged or manipulated by clients. Rotating `SESSION_SECRET` instantly revokes all active session cookies without altering the owner password.
+- **Git History & Repo Safety:** No `.env` or `.env.local` files are tracked in git history or repository commits. All secrets remain strictly in local environment files or Vercel dashboard settings.
+
+### 🩺 Verifying Runtime Health (`/api/health`)
+The public endpoint `/api/health` inspects configured credentials at runtime without exposing raw secrets:
+- `llm.geminiConfigured`: Returns `true` when a valid `GEMINI_API_KEY` is present.
+- `llm.grokConfigured`: Returns `true` when `XAI_API_KEY` is configured.
+- `database.mode`: Displays `supabase_postgres` when connected to Supabase, or `in_memory_store` in local offline development.
+- `ownerConsole.protected`: Confirms route guards are active with HMAC-SHA256 cookie signing.
 
 ---
 

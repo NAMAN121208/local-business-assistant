@@ -27,11 +27,20 @@ export async function initKnowledgeBase(): Promise<void> {
   }
 }
 
+export interface NeverAnswerCheckResult {
+  matched: boolean;
+  isMedical: boolean;
+  isCustomPolicy: boolean;
+  matchedRule?: string;
+}
+
 /**
  * Fast safety pre-filter for sensitive / never-answer topics across English, Hindi, Hinglish, Kannada & Kanglish
- * Returns true if the query asks for medical advice, prescription, dosage, diagnosis, or acute symptom relief.
  */
-export function isNeverAnswerTopic(query: string, neverAnswerRules: string[] = []): boolean {
+export function checkNeverAnswerTopic(
+  query: string,
+  neverAnswerRules: string[] = []
+): NeverAnswerCheckResult {
   const lower = query.toLowerCase();
 
   // 1. Multilingual sensitive keywords & patterns
@@ -52,7 +61,9 @@ export function isNeverAnswerTopic(query: string, neverAnswerRules: string[] = [
     /\b(kaunsi|kounsi|kya)\s+(dawa|dawai|goli|tablet)\b/,
     /\b(khurak|dosage|dose|kitni\s+goli)\b/,
     /\b(ilaj|upchar|doctori\s+salah)\b/,
-    /\b(seena\s+dard|chhati\s+mein\s+dard|saans\s+phoolna)\b/,
+    /\b(seena\s+dard|chhati\s+mein\s+dard|chati\s+mein\s+dard|saans\s+phoolna)\b/,
+    /\b(chhati|chati)\b.*?\b(dard|pressure|dawa|dawai)\b/,
+    /\b(headache|fever)\b.*?\b(dolo|paracetamol|pop|take)\b/,
     /[\u0900-\u097F].*?(दवा|दवाई|गोली|खुराक|इलाज|उपचार|बुखार|दर्द|उल्टी|खांसी|चोट)/,
     /\b(बुखार|दवा|दवाई|गोली|इलाज|खुराक)\b/,
 
@@ -67,20 +78,30 @@ export function isNeverAnswerTopic(query: string, neverAnswerRules: string[] = [
 
   for (const pattern of sensitivePatterns) {
     if (pattern.test(lower) || pattern.test(query)) {
-      return true;
+      return { matched: true, isMedical: true, isCustomPolicy: false, matchedRule: 'clinical_guardrail' };
     }
   }
 
   // Check custom clinic never_answer rules
   for (const rule of neverAnswerRules) {
+    const isMedicalRule = /medical|prescrib|diagnos|symptom|acute|emergency/i.test(rule);
     const keywords = rule.toLowerCase().split(/\s+/).filter((w) => w.length > 4);
     const matches = keywords.filter((kw) => lower.includes(kw));
     if (matches.length >= 2) {
-      return true;
+      return {
+        matched: true,
+        isMedical: isMedicalRule,
+        isCustomPolicy: !isMedicalRule,
+        matchedRule: rule,
+      };
     }
   }
 
-  return false;
+  return { matched: false, isMedical: false, isCustomPolicy: false };
+}
+
+export function isNeverAnswerTopic(query: string, neverAnswerRules: string[] = []): boolean {
+  return checkNeverAnswerTopic(query, neverAnswerRules).matched;
 }
 
 /**
@@ -160,10 +181,25 @@ export async function retrieveRelevantKnowledge(
     'clinic', 'does', 'can', 'about', 'from', 'this', 'that', 'our', 'here'
   ]);
 
+  const TYPO_MAP: Record<string, string> = {
+    clinc: 'clinic',
+    docter: 'doctor',
+    doctar: 'doctor',
+    apointment: 'appointment',
+    apointmnt: 'appointment',
+    locatd: 'located',
+    meto: 'metro',
+    neareest: 'nearest',
+    whr: 'where',
+    statn: 'station',
+    sigthare: 'doctor',
+  };
+
   const queryTerms = userMessage
     .toLowerCase()
     .replace(/[^\w\s]/g, ' ')
     .split(/\s+/)
+    .map((w) => TYPO_MAP[w] || w)
     .filter((w) => w.length > 2 && !STOP_WORDS.has(w));
 
   // Score and filter FAQs

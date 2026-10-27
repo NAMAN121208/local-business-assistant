@@ -10,6 +10,7 @@
     "test:llm": "tsx scripts/test-llm.ts",
     "test:bot": "tsx scripts/test-bot.ts",
     "test:owner": "tsx scripts/test-owner.ts",
+    "test:correction": "tsx scripts/test-correction-generality.ts",
     "eval": "tsx scripts/eval.ts"
   },
   "dependencies": {

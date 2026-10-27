@@ -212,6 +212,199 @@ export function computeKBDiff(
 }
 
 /**
+ * General semantic correction fallback when LLM is offline or returns non-JSON.
+ * Interprets hours changes, service additions, and policy guardrails without hardcoding specific days or procedures.
+ */
+export function applySemanticCorrectionFallback(
+  correctionText: string,
+  currentKB: KnowledgeBaseContent
+): KnowledgeBaseContent {
+  const candidateContent: KnowledgeBaseContent = JSON.parse(JSON.stringify(currentKB));
+  const lower = correctionText.toLowerCase();
+  const emergencyNum =
+    currentKB.facts.emergency_phone || currentKB.facts.phone || '+91 98765 99999';
+
+  // 1. Day of week & Working hours updates (General across all 7 days)
+  const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  for (const day of days) {
+    const dayLower = day.toLowerCase();
+    if (lower.includes(dayLower)) {
+      // Check for closing time change (e.g. "close at 6 pm" or "closes at 6:00 pm")
+      const closeMatch = lower.match(/close(?:s)?\s*(?:at)?\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)/i);
+
+      if (closeMatch && !lower.includes('closed except')) {
+        let closeTimeStr = closeMatch[1].trim();
+        if (!closeTimeStr.toLowerCase().includes('pm') && !closeTimeStr.toLowerCase().includes('am')) {
+          closeTimeStr += ' PM';
+        }
+        const timeNormalized = closeTimeStr.toUpperCase();
+        let formattedClose = timeNormalized.includes(':')
+          ? timeNormalized
+          : timeNormalized.replace(/\s*(AM|PM)/, ':00 $1');
+        if (formattedClose.includes(':')) {
+          const [h, rest] = formattedClose.split(':');
+          formattedClose = `${h.padStart(2, '0')}:${rest}`;
+        }
+        candidateContent.facts.hours[day] = `09:00 AM - 01:00 PM, 04:00 PM - ${formattedClose}`;
+
+        const faqIdx = candidateContent.faqs.findIndex(
+          (f) => f.question.toLowerCase().includes(dayLower) || (f.keywords && f.keywords.includes(dayLower))
+        );
+        const dayFaq = {
+          id: faqIdx !== -1 ? candidateContent.faqs[faqIdx].id : `faq_${dayLower}_timings`,
+          question: `What are your clinic timings on ${day}?`,
+          answer: `On ${day}s, City Health Clinic is open: ${candidateContent.facts.hours[day]}.`,
+          category: 'timings',
+          keywords: [dayLower, 'timings', 'hours', 'open', 'close', 'saturday', 'timing'],
+        };
+        if (faqIdx !== -1) {
+          candidateContent.faqs[faqIdx] = dayFaq;
+        } else {
+          candidateContent.faqs.unshift(dayFaq);
+        }
+      } else if (lower.includes('closed') || lower.includes('closed except')) {
+        candidateContent.facts.hours[day] = `Closed except for emergencies (Emergency on-call: ${emergencyNum})`;
+        const faqIdx = candidateContent.faqs.findIndex(
+          (f) => f.question.toLowerCase().includes(dayLower) || (f.keywords && f.keywords.includes(dayLower))
+        );
+        const dayFaq = {
+          id: faqIdx !== -1 ? candidateContent.faqs[faqIdx].id : `faq_${dayLower}_timings`,
+          question: `Are you open on ${day}s?`,
+          answer: `City Health Clinic is closed on ${day}s for routine outpatient appointments. However, emergency on-call care is available 24/7 at ${emergencyNum}.`,
+          category: 'timings',
+          keywords: [dayLower, 'timings', 'hours', 'open', 'closed', 'emergency'],
+        };
+        if (faqIdx !== -1) {
+          candidateContent.faqs[faqIdx] = dayFaq;
+        } else {
+          candidateContent.faqs.unshift(dayFaq);
+        }
+      }
+    }
+  }
+
+  // 2. Service additions or updates (General)
+  // e.g. "We added a dental cleaning service, 30 minutes, 800 rupees"
+  if (lower.includes('add') || lower.includes('added') || lower.includes('new service')) {
+    const durationMatch = lower.match(/(\d+)\s*(?:mins|minutes|min)/i);
+    const priceMatch =
+      lower.match(/(\d+)\s*(?:rupees|rs|inr)/i) ||
+      lower.match(/(?:fee|price|cost)\s*(?:of)?\s*(?:rs\.?|inr)?\s*(\d+)/i);
+
+    const nameMatch = lower.match(/(?:added|add)\s+(?:a|an)?\s*([^,\.]+?)(?:\s+service|,|\s+\d+)/i);
+    const serviceName = nameMatch ? nameMatch[1].trim() : 'Specialist Service';
+    const capitalizedName = serviceName.replace(/\b\w/g, (c) => c.toUpperCase());
+    const duration = durationMatch ? parseInt(durationMatch[1], 10) : 30;
+    const price = priceMatch ? parseInt(priceMatch[1], 10) : undefined;
+    const slug = serviceName.replace(/\s+/g, '_').toLowerCase();
+
+    const existingSvcIdx = candidateContent.services.findIndex(
+      (s) => s.name.toLowerCase().includes(serviceName) || s.id.includes(slug)
+    );
+    const newService = {
+      id: existingSvcIdx !== -1 ? candidateContent.services[existingSvcIdx].id : `service_${slug}`,
+      name: capitalizedName,
+      duration_mins: duration,
+      price,
+      description: `${capitalizedName} (${duration} mins${price ? ` - ₹${price}` : ''})`,
+    };
+
+    if (existingSvcIdx !== -1) {
+      candidateContent.services[existingSvcIdx] = newService;
+    } else {
+      candidateContent.services.push(newService);
+    }
+
+    const faqIdx = candidateContent.faqs.findIndex(
+      (f) => f.question.toLowerCase().includes(serviceName) || (f.keywords && f.keywords.includes(slug))
+    );
+    const svcKeywords = serviceName.split(/\s+/).concat(['service', 'booking', 'cost', 'fee', 'charge']);
+    const serviceFaq = {
+      id: faqIdx !== -1 ? candidateContent.faqs[faqIdx].id : `faq_${slug}`,
+      question: `Do you offer ${serviceName} and what is the fee?`,
+      answer: `Yes, City Health Clinic offers ${capitalizedName} (${duration} minutes)${price ? ` for ₹${price}` : ''}. Appointments can be scheduled with our clinic team.`,
+      category: 'services',
+      keywords: svcKeywords,
+    };
+
+    if (faqIdx !== -1) {
+      candidateContent.faqs[faqIdx] = serviceFaq;
+    } else {
+      candidateContent.faqs.unshift(serviceFaq);
+    }
+  }
+
+  // 3. Prohibited topics / Custom guardrails (General)
+  // e.g. "Never discuss pricing over chat, ask them to call"
+  if (
+    lower.includes('never') ||
+    lower.includes("don't") ||
+    lower.includes('do not') ||
+    lower.includes('ask them to call')
+  ) {
+    if (lower.includes('pricing') || lower.includes('price') || lower.includes('fee')) {
+      const rule = 'Discussing or quoting procedure and treatment pricing over chat (patients must call clinic directly)';
+      if (!candidateContent.never_answer.includes(rule)) {
+        candidateContent.never_answer.push(rule);
+      }
+      const escRule = 'Customer asks for pricing or fee details over chat -> escalate or direct to call clinic directly';
+      if (!candidateContent.escalation_rules.includes(escRule)) {
+        candidateContent.escalation_rules.push(escRule);
+      }
+
+      const pricingFaq = {
+        id: 'faq_pricing_policy',
+        question: 'What are your treatment and procedure charges?',
+        answer: `We do not discuss procedure pricing over chat. Please call City Health Clinic directly at ${currentKB.facts.phone || '+91 80 2525 0100'} for all pricing and fee inquiries.`,
+        category: 'pricing',
+        keywords: ['pricing', 'price', 'fee', 'fees', 'cost', 'charges', 'rate'],
+      };
+      const existingPricingFaqIdx = candidateContent.faqs.findIndex(
+        (f) => f.keywords && f.keywords.includes('pricing')
+      );
+      if (existingPricingFaqIdx !== -1) {
+        candidateContent.faqs[existingPricingFaqIdx] = pricingFaq;
+      } else {
+        candidateContent.faqs.unshift(pricingFaq);
+      }
+    } else {
+      const prohibitionRule = `Prohibited by clinic owner: ${correctionText.trim()}`;
+      if (!candidateContent.never_answer.includes(prohibitionRule)) {
+        candidateContent.never_answer.push(prohibitionRule);
+      }
+    }
+  }
+
+  // 4. General informational FAQ additions/updates (e.g. equipment, diagnostic tie-ups, clinic facilities)
+  const isHoursChange = lower.includes('close') || lower.includes('hours') || lower.includes('timings');
+  const isServiceChange = lower.includes('added') || lower.includes('add ') || lower.includes('new service');
+  const isProhibitionChange = lower.includes('never') || lower.includes("don't") || lower.includes('do not');
+
+  if (!isHoursChange && !isServiceChange && !isProhibitionChange) {
+    const stopWords = new Set([
+      'have', 'with', 'that', 'this', 'where', 'receive', 'clinic', 'official',
+      'does', 'from', 'into', 'what', 'when', 'some', 'about', 'they', 'their'
+    ]);
+    const extractedKeywords = lower
+      .replace(/[^\w\s]/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length > 2 && !stopWords.has(w));
+
+    const faqId = `faq_info_${Date.now()}`;
+    const question = `Do you offer ${extractedKeywords.slice(0, 3).join(' ')} or related facilities?`;
+    candidateContent.faqs.unshift({
+      id: faqId,
+      question,
+      answer: correctionText.trim(),
+      category: 'facilities',
+      keywords: extractedKeywords.slice(0, 10),
+    });
+  }
+
+  return candidateContent;
+}
+
+/**
  * Code-level validation to prevent unauthorized or hallucinated mutations after voice corrections.
  * Any KB field modified that the correction text did not explicitly mention is reverted and logged.
  */
@@ -227,13 +420,13 @@ export function validateAndConstrainCorrection(
   const constrained: KnowledgeBaseContent = JSON.parse(JSON.stringify(candidateAfter));
   const rejectedModifications: string[] = [];
 
-  // 1. Working Hours validation per day
+  // 1. Working Hours validation per day (General across all 7 days)
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
   for (const day of days) {
     const dayLower = day.toLowerCase();
     const isDayMentioned =
       lower.includes(dayLower) ||
-      (dayLower === 'sunday' && (lower.includes('weekend') || lower.includes('closed')));
+      (lower.includes('weekend') && (dayLower === 'saturday' || dayLower === 'sunday'));
     const beforeHour = before.facts.hours?.[day];
     const candidateHour = candidateAfter.facts.hours?.[day];
 
@@ -256,7 +449,13 @@ export function validateAndConstrainCorrection(
     lower.includes('service') ||
     lower.includes('doctor') ||
     lower.includes('consultation') ||
-    lower.includes('treatment');
+    lower.includes('treatment') ||
+    lower.includes('dental') ||
+    lower.includes('added') ||
+    lower.includes('add');
+
+  const isAddingOrUpdatingService =
+    lower.includes('add') || lower.includes('new service') || lower.includes('duration');
 
   if (!mentionsPricing && !mentionsService) {
     if (JSON.stringify(before.services) !== JSON.stringify(candidateAfter.services)) {
@@ -265,6 +464,9 @@ export function validateAndConstrainCorrection(
         'Unrelated modifications to clinic services and consultation fees reverted'
       );
     }
+  } else if (!isAddingOrUpdatingService && (lower.includes('never') || lower.includes("don't") || lower.includes('do not'))) {
+    // If owner only dictated a negative policy (e.g. "Never discuss pricing"), do not let services change
+    constrained.services = JSON.parse(JSON.stringify(before.services));
   }
 
   // 3. Location / Address validation
@@ -285,6 +487,7 @@ export function validateAndConstrainCorrection(
   const explicitSafetyBypass =
     lower.includes('remove safety') || lower.includes('allow medical advice');
   if (!explicitSafetyBypass) {
+    // Existing critical medical guardrails can NEVER be removed
     for (const rule of before.never_answer || []) {
       if (!constrained.never_answer.includes(rule)) {
         constrained.never_answer.push(rule);

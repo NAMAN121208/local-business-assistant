@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { DEMO_CLINIC_ID, demoClinicKBContent } from '@/lib/kb/demo-clinic';
 import {
+  applySemanticCorrectionFallback,
   computeKBDiff,
   KnowledgeBaseContentSchema,
   validateAndConstrainCorrection,
@@ -34,7 +35,7 @@ STRICT RULES:
 1. Update ONLY the specific entries, hours, or FAQs that the owner's correction explicitly addresses.
 2. DO NOT change or invent unrelated facts, doctors, services, or prices.
 3. SAFETY RULE: DO NOT remove or weaken any safety guardrails in 'never_answer' (no medical diagnosis, no drug prescriptions).
-4. If the owner specifies clinic hours for a day (e.g. Sunday closed except emergencies), accurately update facts.hours and relevant FAQs.
+4. If the owner specifies clinic hours for any day, accurately update facts.hours and relevant FAQs.
 5. Output the complete updated KnowledgeBaseContent as a valid JSON object matching the schema.`;
 
     const result = await callLLM({
@@ -44,42 +45,19 @@ STRICT RULES:
     });
 
     let candidateContent: KnowledgeBaseContent;
-    try {
-      const parsed = JSON.parse(result.reply_text);
-      const validated = KnowledgeBaseContentSchema.safeParse(parsed);
-      candidateContent = validated.success ? validated.data : JSON.parse(JSON.stringify(currentKB));
-    } catch (e) {
-      // Deterministic fallback for common corrections
-      candidateContent = JSON.parse(JSON.stringify(currentKB));
-    }
-
-    // Deterministic alignment for Sunday correction
-    const lower = correctionText.toLowerCase();
-    if (lower.includes('sunday')) {
-      const emergencyNum =
-        currentKB.facts.emergency_phone || currentKB.facts.phone || '+91 98765 99999';
-      candidateContent.facts.hours.Sunday = `Closed except for emergencies (Emergency on-call: ${emergencyNum})`;
-
-      // Update or add specific Sunday FAQ
-      const existingSundayIdx = candidateContent.faqs.findIndex(
-        (f) =>
-          f.question.toLowerCase().includes('sunday') ||
-          (f.keywords && f.keywords.includes('sunday'))
-      );
-
-      const sundayFaq = {
-        id: existingSundayIdx !== -1 ? candidateContent.faqs[existingSundayIdx].id : `faq_sunday_timings`,
-        question: 'Are you open on Sundays?',
-        answer: `City Health Clinic is closed on Sundays for routine outpatient appointments. However, we are available 24/7 for medical emergencies at ${emergencyNum}.`,
-        category: 'timings',
-        keywords: ['sunday', 'open', 'hours', 'weekend', 'closed', 'emergency', 'timings'],
-      };
-
-      if (existingSundayIdx !== -1) {
-        candidateContent.faqs[existingSundayIdx] = sundayFaq;
-      } else {
-        candidateContent.faqs.unshift(sundayFaq);
+    if (result.provider !== 'fallback') {
+      try {
+        const parsed = JSON.parse(result.reply_text);
+        const validated = KnowledgeBaseContentSchema.safeParse(parsed);
+        candidateContent = validated.success
+          ? validated.data
+          : applySemanticCorrectionFallback(correctionText, currentKB);
+      } catch (e) {
+        candidateContent = applySemanticCorrectionFallback(correctionText, currentKB);
       }
+    } else {
+      // General semantic interpreter when LLM is offline or in fallback mode
+      candidateContent = applySemanticCorrectionFallback(correctionText, currentKB);
     }
 
     // Code-level validation: enforce that unmentioned fields are reverted, and safety rules locked

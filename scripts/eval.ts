@@ -57,9 +57,33 @@ async function runEvaluation() {
 
   const { processMessage } = await import('../src/lib/orchestrator');
   const { initKnowledgeBase } = await import('../src/lib/kb');
-  const { DEMO_CLINIC_ID } = await import('../src/lib/kb/demo-clinic');
+  const { DEMO_CLINIC_ID, demoClinicKBVersion } = await import('../src/lib/kb/demo-clinic');
   const { db } = await import('../src/lib/db');
-  const { validateAndConstrainCorrection } = await import('../src/lib/kb/voice-setup');
+  const { applySemanticCorrectionFallback, validateAndConstrainCorrection } = await import(
+    '../src/lib/kb/voice-setup'
+  );
+
+  // Always reset to pristine Version 1 at the beginning of the evaluation suite
+  await db.saveKnowledgeBaseVersion(demoClinicKBVersion);
+
+  function getPathLabel(provider: string): string {
+    if (provider === 'gemini' || provider === 'grok') {
+      return `[Path: LLM (${provider})]`;
+    }
+    if (provider === 'deterministic_guardrail') {
+      return `[Path: Deterministic Guardrail (Layer 1 Keyword Heuristic)]`;
+    }
+    if (provider === 'deterministic_booking_engine') {
+      return `[Path: Deterministic Booking Engine]`;
+    }
+    if (provider === 'kb_direct') {
+      return `[Path: KB Direct Offline Match]`;
+    }
+    if (provider === 'fallback' || provider === 'needs_human_hold') {
+      return `[Path: Safe Fallback / Human Escalation]`;
+    }
+    return `[Path: Other (${provider})]`;
+  }
 
   await initKnowledgeBase();
 
@@ -125,7 +149,7 @@ async function runEvaluation() {
         `[${i + 1}/${cases.length}] ${statusIcon} [${tc.category}] "${tc.name}"`
       );
       console.log(
-        `      Expected: ${tc.expectedDecision} | Actual: ${res.decision} | Provider: ${res.provider} (${latency}ms)`
+        `      Expected: ${tc.expectedDecision} | Actual: ${res.decision} | ${getPathLabel(res.provider)} (${latency}ms)`
       );
       if (!caseResult.passed) {
         console.log(`      ⚠️ Reply Preview: ${res.text.slice(0, 100)}...`);
@@ -171,16 +195,7 @@ async function runEvaluation() {
     const correctionText =
       'We do not have an in-house MRI or CT scan machine, but we have an official tie-up with Indiranagar Diagnostics across the street where clinic patients receive a 15% discount.';
     if (currentKB) {
-      const candidate = JSON.parse(JSON.stringify(currentKB.content));
-      candidate.faqs.unshift({
-        id: `faq_mri_scan_${Date.now()}`,
-        question: 'Do you offer MRI and CT scan facilities at the clinic?',
-        answer:
-          'City Health Clinic does not have an in-house MRI or CT scan, but we have an official tie-up with Indiranagar Diagnostics across the street where our patients receive a 15% discount.',
-        category: 'services',
-        keywords: ['mri', 'ct scan', 'scan', 'diagnostics', 'ultrasound', 'imaging'],
-      });
-
+      const candidate = applySemanticCorrectionFallback(correctionText, currentKB.content);
       const { constrainedContent } = validateAndConstrainCorrection(
         correctionText,
         currentKB.content,
@@ -222,7 +237,34 @@ async function runEvaluation() {
   console.log('====================================================');
   console.log(`Overall Accuracy: ${overallAccuracy}% (${passedCases}/${totalCases} passed)`);
   console.log(`Safety Metric (Medical/Out-of-Scope answer violations): ${safetyViolations} (Target: 0)`);
-  console.log('Category Breakdown:');
+
+  const llmCount = results.filter((r) => r.provider === 'gemini' || r.provider === 'grok').length;
+  const llmPct = Math.round((llmCount / totalCases) * 100);
+  const deterministicCount = results.filter((r) => r.provider.startsWith('deterministic_')).length;
+  const kbDirectCount = results.filter((r) => r.provider === 'kb_direct').length;
+  const fallbackCount = results.filter(
+    (r) => r.provider === 'fallback' || r.provider === 'needs_human_hold'
+  ).length;
+
+  console.log('\nExecution Path Distribution:');
+  console.log(`  - Real LLM Calls (Gemini/Grok): ${llmCount}/${totalCases} (${llmPct}%)`);
+  console.log(
+    `  - Deterministic Guardrails & Engine: ${deterministicCount}/${totalCases} (${Math.round(
+      (deterministicCount / totalCases) * 100
+    )}%)`
+  );
+  console.log(
+    `  - KB Direct Offline Match: ${kbDirectCount}/${totalCases} (${Math.round(
+      (kbDirectCount / totalCases) * 100
+    )}%)`
+  );
+  console.log(
+    `  - Fallback / Escalation: ${fallbackCount}/${totalCases} (${Math.round(
+      (fallbackCount / totalCases) * 100
+    )}%)`
+  );
+
+  console.log('\nCategory Breakdown:');
 
   for (const [cat, stat] of Object.entries(categoryStats)) {
     const acc = Math.round((stat.passed / stat.total) * 100);

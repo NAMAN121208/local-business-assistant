@@ -2,7 +2,12 @@
 import { db } from './db';
 import { Conversation, Customer, Message } from './db/types';
 import { callLLM, LLMMessage, LLMResult } from './llm';
-import { classifySafetyWithLLM, isNeverAnswerTopic, retrieveRelevantKnowledge } from './kb';
+import {
+  checkNeverAnswerTopic,
+  classifySafetyWithLLM,
+  isNeverAnswerTopic,
+  retrieveRelevantKnowledge,
+} from './kb';
 import {
   checkAvailability,
   confirmBooking,
@@ -111,12 +116,14 @@ export async function processMessage(params: {
     kbData.facts.emergency_phone || kbData.facts.phone || '+91 98765 99999';
 
   // Strict Layer 1: Fast Multilingual Keyword & Regex Guardrails (EN, HI, KN)
-  const isMedicalKeywordMatch = isNeverAnswerTopic(userText, kbData.neverAnswer);
+  const neverAnswerCheck = checkNeverAnswerTopic(userText, kbData.neverAnswer);
+  const isMedicalKeywordMatch = neverAnswerCheck.matched && neverAnswerCheck.isMedical;
+  const isCustomPolicyMatch = neverAnswerCheck.matched && neverAnswerCheck.isCustomPolicy;
 
   // Strict Layer 2: LLM Safety Classification (if keyword did not flag, but message could be clinical)
   let isMedicalLLMMatch = false;
   let llmSafetyReason = '';
-  if (!isMedicalKeywordMatch) {
+  if (!neverAnswerCheck.matched) {
     const safetyCheck = await classifySafetyWithLLM(userText);
     if (safetyCheck.isMedicalOrSensitive) {
       isMedicalLLMMatch = true;
@@ -168,12 +175,50 @@ export async function processMessage(params: {
     };
   }
 
+  if (isCustomPolicyMatch) {
+    const pricingFaq = kbData.faqs.find((f) => f.keywords && f.keywords.includes('pricing'));
+    const policyReply =
+      pricingFaq?.answer ||
+      `We do not discuss this topic over chat per clinic policy. Please call City Health Clinic directly at ${kbData.facts.phone || '+91 80 2525 0100'}.`;
+
+    await db.createEscalation({
+      conversation_id: convId,
+      reason: `Prohibited topic per clinic policy: ${neverAnswerCheck.matchedRule}`,
+      ai_summary: `Customer asked: "${userText.slice(0, 100)}..."`,
+      suggested_reply: `Advise patient to call clinic at ${kbData.facts.phone || '+91 80 2525 0100'}.`,
+      status: 'open',
+    });
+
+    await db.updateConversationStatus(convId, 'needs_human');
+
+    await db.createMessage({
+      conversation_id: convId,
+      sender: 'bot',
+      text: policyReply,
+      language: langDetection.language,
+      intent: 'sensitive_or_out_of_scope',
+      decision: 'escalate',
+      confidence: 1.0,
+      kb_refs: ['never_answer_policy'],
+      provider: 'deterministic_guardrail',
+    });
+
+    return {
+      conversationId: convId,
+      text: policyReply,
+      decision: 'escalate',
+      intent: 'sensitive_or_out_of_scope',
+      provider: 'deterministic_guardrail',
+      quickReplies: ['Call Clinic', 'Clinic Hours', 'Location'],
+    };
+  }
+
   // 7. Deterministic Multilingual Booking Engine & Slot Filling
   const lower = userText.toLowerCase();
   const history = await db.getRecentMessages(convId, 8);
 
   const isBookingQuery =
-    /\b(book|appointment|slot|schedule|consultation|doctor|available|timings|milega|milenge|dikhana|dikha|chahiye|beku|ideya|sigutha|madalu)\b/i.test(
+    /\b(book|appointment|apointment|slot|schedule|consultation|doctor|docter|dr\b|checkup|available|timings|milega|milenge|dikhana|dikha|chahiye|beku|ideya|sigutha|madalu)\b/i.test(
       userText
     );
   const targetDate = parseRelativeDate(userText, 'Asia/Kolkata');
@@ -348,18 +393,36 @@ Never Answer Rules: ${JSON.stringify(kbData.neverAnswer)}`;
       .filter((w) => w.length > 2 && !stopWords.has(w));
 
     if (kbData.faqs.length > 0 && queryTerms.length > 0) {
-      const topFaq = kbData.faqs[0];
-      const textToMatch = `${topFaq.question} ${topFaq.answer} ${(topFaq.keywords || []).join(' ')}`.toLowerCase();
-      const matchCount = queryTerms.filter((term) => textToMatch.includes(term)).length;
+      let bestFaq = kbData.faqs[0];
+      let maxMatches = 0;
 
-      if (matchCount >= 2 || (queryTerms.length === 1 && matchCount === 1)) {
+      for (const faq of kbData.faqs) {
+        const textToMatch = `${faq.question} ${faq.answer} ${(faq.keywords || []).join(' ')}`.toLowerCase();
+        const matches = queryTerms.filter((term) => {
+          try {
+            return new RegExp(`\\b${term}\\b`, 'i').test(textToMatch);
+          } catch {
+            return textToMatch.includes(term);
+          }
+        }).length;
+
+        if (matches > maxMatches) {
+          maxMatches = matches;
+          bestFaq = faq;
+        }
+      }
+
+      const isConfidentMatch =
+        (queryTerms.length <= 2 && maxMatches >= 1) || maxMatches >= 2;
+
+      if (isConfidentMatch) {
         llmResult = {
           intent: 'faq',
           decision: 'answer',
-          reply_text: topFaq.answer,
+          reply_text: bestFaq.answer,
           language: langDetection.language,
           confidence: 0.95,
-          kb_refs: [topFaq.id],
+          kb_refs: [bestFaq.id],
           tool_calls: [],
           provider: 'kb_direct',
         };
