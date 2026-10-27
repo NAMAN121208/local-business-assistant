@@ -171,6 +171,74 @@ export function parseTimeWindow(text: string): 'morning' | 'evening' | 'any' {
   return 'any';
 }
 
+/**
+ * Detects an explicit requested time in message (e.g. "2 PM", "2:30 pm", "14:00", "2 baje", "8 am")
+ */
+export interface RequestedTime {
+  hour: number;
+  minute: number;
+  display: string;
+  isBreak: boolean; // 13:00 <= hour < 16:00 (1 PM - 4 PM)
+  isEarly: boolean; // hour < 9 (before 9 AM)
+  isClosed: boolean; // hour >= 20 (after 8 PM)
+}
+
+export function parseRequestedTime(text: string): RequestedTime | null {
+  const lower = text.toLowerCase();
+
+  // Match 12-hour or 24-hour patterns: "2 PM", "2:30 pm", "2pm"
+  const timeRegex = /\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i;
+  const match = lower.match(timeRegex);
+  if (match) {
+    let hour = parseInt(match[1], 10);
+    const minute = match[2] ? parseInt(match[2], 10) : 0;
+    const period = match[3].toLowerCase();
+    if (period === 'pm' && hour < 12) hour += 12;
+    if (period === 'am' && hour === 12) hour = 0;
+    const h12 = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+    const display = `${h12}:${String(minute).padStart(2, '0')} ${ampm}`;
+    return {
+      hour,
+      minute,
+      display,
+      isBreak: hour >= 13 && hour < 16,
+      isEarly: hour < 9,
+      isClosed: hour >= 20,
+    };
+  }
+
+  // Match Indic forms: "2 baje", "dopehar 2 baje", "madhyahna 2 gante"
+  const indicMatch = lower.match(/\b(\d{1,2})(?::(\d{2}))?\s*(?:baje|gante)\b/i);
+  if (indicMatch) {
+    let hour = parseInt(indicMatch[1], 10);
+    const minute = indicMatch[2] ? parseInt(indicMatch[2], 10) : 0;
+    const isPmHint =
+      lower.includes('dopahar') ||
+      lower.includes('dopehar') ||
+      lower.includes('shaam') ||
+      lower.includes('sham') ||
+      lower.includes('raat') ||
+      lower.includes('sanje') ||
+      lower.includes('madhyahna') ||
+      lower.includes('raatri');
+    if (isPmHint && hour < 12) hour += 12;
+    const h12 = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+    const display = `${h12}:${String(minute).padStart(2, '0')} ${ampm}`;
+    return {
+      hour,
+      minute,
+      display,
+      isBreak: hour >= 13 && hour < 16,
+      isEarly: hour < 9,
+      isClosed: hour >= 20,
+    };
+  }
+
+  return null;
+}
+
 
 /**
  * Checks available 30-min booking slots deterministically in code
@@ -247,10 +315,13 @@ export async function checkAvailability(params: {
     { hour: 19, minute: 30, window: 'evening' },
   ];
 
-  // 5. Query existing confirmed bookings for this date
+  // 5. Query existing confirmed bookings for this date (scoped by service if provided)
   const existingBookings = await db.findBookings(businessId, { date: dateStr, status: 'confirmed' });
+  const relevantBookings = params.service
+    ? existingBookings.filter((b) => b.service.toLowerCase() === params.service!.toLowerCase())
+    : existingBookings;
   const bookedTimes = new Set(
-    existingBookings.map((b) => {
+    relevantBookings.map((b) => {
       const dt = new Date(b.start_time);
       return `${String(dt.getUTCHours()).padStart(2, '0')}:${String(dt.getUTCMinutes()).padStart(2, '0')}`;
     })
@@ -313,7 +384,7 @@ export async function checkAvailability(params: {
 /**
  * Creates confirmed booking deterministically
  */
-// In-memory slot mutex to serialize concurrent booking confirmations for the exact same slot
+// In-memory slot mutex to serialize concurrent booking confirmations for the exact same service and slot
 const activeSlotLocks = new Set<string>();
 
 export async function confirmBooking(params: {
@@ -324,7 +395,7 @@ export async function confirmBooking(params: {
   endTimeIso: string;
   notes?: string;
 }): Promise<Booking> {
-  const lockKey = `${params.businessId}_${params.startTimeIso}`;
+  const lockKey = `${params.businessId}_${params.service.toLowerCase()}_${params.startTimeIso}`;
   if (activeSlotLocks.has(lockKey)) {
     throw new Error('Slot occupied: This slot has already been booked by another patient.');
   }
@@ -338,8 +409,12 @@ export async function confirmBooking(params: {
     });
 
     const targetMs = new Date(params.startTimeIso).getTime();
+    const serviceLower = params.service.toLowerCase();
     const alreadyBooked = existingBookings.some(
-      (b) => b.status === 'confirmed' && new Date(b.start_time).getTime() === targetMs
+      (b) =>
+        b.status === 'confirmed' &&
+        b.service.toLowerCase() === serviceLower &&
+        new Date(b.start_time).getTime() === targetMs
     );
 
     if (alreadyBooked) {
@@ -355,6 +430,15 @@ export async function confirmBooking(params: {
       status: 'confirmed',
       notes: params.notes || null,
     });
+  } catch (err: any) {
+    if (
+      err?.code === '23505' ||
+      err?.message?.includes('duplicate key') ||
+      err?.message?.includes('unique constraint')
+    ) {
+      throw new Error('Slot occupied: This slot has already been booked by another patient.');
+    }
+    throw err;
   } finally {
     activeSlotLocks.delete(lockKey);
   }

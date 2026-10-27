@@ -16,3 +16,10 @@ REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon;
 
 -- Explicitly allow service_role full access
 GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role;
+
+-- Partial unique index for double-booking protection:
+-- Scoped to (business_id, service, start_time) so different doctors/services can consult simultaneously,
+-- while strictly preventing double-booking the same doctor/service for the same slot.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_confirmed_booking_slot
+ON bookings (business_id, service, start_time)
+WHERE (status = 'confirmed');

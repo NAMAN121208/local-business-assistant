@@ -370,6 +370,24 @@ export class DBClient {
     return fullBooking;
   }
 
+  async getBooking(id: string): Promise<Booking | null> {
+    if (this.supabase) {
+      const { data, error } = await this.supabase
+        .from('bookings')
+        .select('*')
+        .ilike('id', id)
+        .maybeSingle();
+      if (!error && data) return data as Booking;
+    }
+    const idLower = id.toLowerCase();
+    for (const [key, b] of memoryStore.bookings.entries()) {
+      if (key.toLowerCase() === idLower || b.id.toLowerCase() === idLower) {
+        return b;
+      }
+    }
+    return null;
+  }
+
   async findBookings(
     businessId: string,
     filters?: { date?: string; customerId?: string; status?: BookingStatus }

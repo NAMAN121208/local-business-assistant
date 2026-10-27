@@ -135,8 +135,54 @@ async function runBookingEdgeCasesSuite() {
   await db.cancelBooking(bookedSlot.id);
   console.log('  ✅ Test 7 Passed: Slot was immediately freed upon cancellation and double-cancellation is safe.\n');
 
+  // 8. Multi-Doctor / Multi-Service Capacity
+  console.log('--- TEST 8: Multi-Doctor Simultaneous Booking & Same-Doctor Collisions ---');
+  const multiDate = '2026-11-12';
+  const startIso12 = `${multiDate}T10:00:00.000Z`;
+  const endIso12 = `${multiDate}T10:30:00.000Z`;
+
+  // Booking for Doctor 1 (General Physician)
+  const bDoc1 = await confirmBooking({
+    businessId: DEMO_CLINIC_ID,
+    customerId: 'cust_doc_1',
+    service: 'General Physician Consultation',
+    startTimeIso: startIso12,
+    endTimeIso: endIso12,
+  });
+
+  // Booking for Doctor 2 (Paediatrician) at the EXACT same time
+  const bDoc2 = await confirmBooking({
+    businessId: DEMO_CLINIC_ID,
+    customerId: 'cust_doc_2',
+    service: 'Paediatric Consultation',
+    startTimeIso: startIso12,
+    endTimeIso: endIso12,
+  });
+
+  console.log(`  Doctor 1 (General Physician) 10:00 AM booking: ${bDoc1.id} (CONFIRMED)`);
+  console.log(`  Doctor 2 (Paediatrician) 10:00 AM booking: ${bDoc2.id} (CONFIRMED)`);
+
+  // Attempt duplicate booking for Doctor 1 (General Physician) at 10:00 AM -> MUST FAIL
+  let duplicateRejected = false;
+  try {
+    await confirmBooking({
+      businessId: DEMO_CLINIC_ID,
+      customerId: 'cust_doc_3',
+      service: 'General Physician Consultation',
+      startTimeIso: startIso12,
+      endTimeIso: endIso12,
+    });
+  } catch (err: any) {
+    duplicateRejected = err.message.includes('Slot occupied');
+  }
+
+  if (!duplicateRejected) {
+    throw new Error('Test 8 Failed: Duplicate booking for the same doctor/service at 10:00 AM was not rejected!');
+  }
+  console.log('  ✅ Test 8 Passed: Different doctors can consult concurrently; same-doctor collisions are rejected.\n');
+
   console.log('====================================================');
-  console.log('🎉 ALL 7 BOOKING ENGINE TESTS PASSED CLEANLY!');
+  console.log('🎉 ALL 8 BOOKING ENGINE TESTS PASSED CLEANLY!');
   console.log('====================================================');
 }
 

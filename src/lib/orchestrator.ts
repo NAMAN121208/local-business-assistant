@@ -14,6 +14,7 @@ import {
   getClinicNow,
   parseRelativeDate,
   parseTimeWindow,
+  parseRequestedTime,
 } from './booking';
 import { OutgoingMessage } from './channels';
 import { detectLanguage, Dialect } from './locale/detector';
@@ -320,6 +321,122 @@ export async function processMessage(params: {
     };
   }
 
+  // 6.8 Customer Cancellation & Reschedule Router (Item 4)
+  const isCancelQuery = /\b(cancel|cancellation|reschedule|radd|cancel\s+karna|cancel\s+madu)\b/i.test(userText);
+  if (isCancelQuery && !userText.toLowerCase().includes('cancel all bookings')) {
+    // Check if user provided Booking ID (e.g. "bk_12345", "bk-12345", or UUID)
+    const idMatch = userText.match(/\b(bk[_-][a-zA-Z0-9_-]+|[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\b/i);
+    // Check for phone number (10 digits, with optional spaces/hyphens and +91)
+    const phoneMatch = userText.match(/(?:\+?91[\s-]?)?([6-9](?:[\s-]?\d){9})\b/);
+
+    if (idMatch && phoneMatch) {
+      const targetBkId = idMatch[1].trim();
+      const providedPhone = phoneMatch[1].replace(/\D/g, '').trim();
+
+      const booking = await db.getBooking(targetBkId);
+      if (!booking) {
+        const notFoundReply = `No booking was found with ID "${targetBkId}". Please check your booking confirmation or call our desk at ${kbData.facts.phone || '+91 98765 43210'}.`;
+        await db.createMessage({
+          conversation_id: convId,
+          sender: 'bot',
+          text: notFoundReply,
+          language: langDetection.language,
+          intent: 'booking_change_or_cancel',
+          decision: 'act',
+          provider: 'deterministic_booking_engine',
+        });
+        return {
+          conversationId: convId,
+          text: notFoundReply,
+          decision: 'act',
+          intent: 'booking_change_or_cancel',
+          provider: 'deterministic_booking_engine',
+          quickReplies: ['Check Clinic Hours', 'Call Clinic'],
+        };
+      }
+
+      // Verify ownership: customer contact must match provided phone
+      const customer = await db.getCustomer(booking.customer_id);
+      const customerContactClean = (customer?.contact || '').replace(/\D/g, '').slice(-10);
+      const providedPhoneClean = providedPhone.replace(/\D/g, '').slice(-10);
+
+      if (!customerContactClean || customerContactClean !== providedPhoneClean) {
+        // Ownership verification failed
+        const securityFailReply = `Security verification failed: The phone number provided does not match the contact on file for booking ${targetBkId}. For security, we cannot cancel or modify another patient's appointment over chat. Please call City Health Clinic directly at ${kbData.facts.phone || '+91 98765 43210'}.`;
+        await db.createMessage({
+          conversation_id: convId,
+          sender: 'bot',
+          text: securityFailReply,
+          language: langDetection.language,
+          intent: 'booking_change_or_cancel',
+          decision: 'act',
+          provider: 'deterministic_booking_engine',
+        });
+        return {
+          conversationId: convId,
+          text: securityFailReply,
+          decision: 'act',
+          intent: 'booking_change_or_cancel',
+          provider: 'deterministic_booking_engine',
+          quickReplies: ['Call Clinic', 'Clinic Hours'],
+        };
+      }
+
+      // Ownership verified! Cancel booking
+      await db.cancelBooking(booking.id);
+      const cancelSuccessReply = `Your appointment ${targetBkId.toUpperCase()} for ${booking.service} has been successfully cancelled and your slot has been released. If you need to rebook for a future date, simply let us know!`;
+      await db.createMessage({
+        conversation_id: convId,
+        sender: 'bot',
+        text: cancelSuccessReply,
+        language: langDetection.language,
+        intent: 'booking_change_or_cancel',
+        decision: 'act',
+        provider: 'deterministic_booking_engine',
+      });
+      return {
+        conversationId: convId,
+        text: cancelSuccessReply,
+        decision: 'act',
+        intent: 'booking_change_or_cancel',
+        provider: 'deterministic_booking_engine',
+        quickReplies: ['Book New Appointment', 'Clinic Hours', 'Emergency Contact'],
+      };
+    } else {
+      // User requested cancellation but did not provide Booking ID and Phone
+      const cancelInstructionReply = `To cancel or reschedule an appointment securely per clinic policy, please reply with your Booking ID and the 10-digit phone number used to book (e.g. "Cancel BK_12345 9876543210"). Our front-desk team has also been notified to assist you if needed.`;
+      
+      await db.createEscalation({
+        conversation_id: convId,
+        reason: 'Customer requested appointment cancellation without full credentials',
+        ai_summary: `Cancellation inquiry: "${userText.slice(0, 100)}"`,
+        suggested_reply: 'Assist patient with appointment cancellation / rescheduling.',
+        status: 'open',
+      });
+
+      await db.createMessage({
+        conversation_id: convId,
+        sender: 'bot',
+        text: cancelInstructionReply,
+        language: langDetection.language,
+        intent: 'booking_change_or_cancel',
+        decision: 'act',
+        confidence: 1.0,
+        kb_refs: ['booking_rules'],
+        provider: 'deterministic_booking_engine',
+      });
+
+      return {
+        conversationId: convId,
+        text: cancelInstructionReply,
+        decision: 'act',
+        intent: 'booking_change_or_cancel',
+        provider: 'deterministic_booking_engine',
+        quickReplies: ['Clinic Hours', 'Call Clinic', 'Talk to Staff'],
+      };
+    }
+  }
+
   // 7. Deterministic Multilingual Booking Engine & Slot Filling
   const lower = userText.toLowerCase();
   const history = await db.getRecentMessages(convId, 8);
@@ -332,6 +449,7 @@ export async function processMessage(params: {
   const timeWindow = parseTimeWindow(userText);
 
   if (isBookingQuery && targetDate) {
+    const requestedTime = parseRequestedTime(userText);
     const matchedService =
       kbData.services.find((s) => {
         const sLower = s.name.toLowerCase();
@@ -350,6 +468,129 @@ export async function processMessage(params: {
       };
 
     const serviceName = matchedService.name;
+
+    // Item 3: Handle requested times during OPD break (1:00 PM - 4:00 PM)
+    if (requestedTime && requestedTime.isBreak) {
+      const avail = await checkAvailability({
+        businessId,
+        service: serviceName,
+        dateStr: targetDate,
+        timeWindow: 'evening', // Nearest slots after break start at 4:00 PM
+      });
+      const nearestSlots = avail.slots.slice(0, 3).map((s) => s.time).join(', ');
+      
+      let breakReply = '';
+      if (langDetection.language === 'hi') {
+        breakReply = `City Health Clinic ${requestedTime.display} baje band rehta hai (OPD break: 1:00 PM - 4:00 PM; OPD timings: 9:00 AM-1:00 PM aur 4:00 PM-8:00 PM). ${targetDate} ke liye nearest available evening slots yeh hain: ${nearestSlots}. Kya aap inme se koi slot book karna chahte hain?`;
+      } else if (langDetection.language === 'kn') {
+        breakReply = `City Health Clinic ${requestedTime.display} ಗಂಟೆಗೆ ಮುಚ್ಚಿರುತ್ತದೆ (OPD ವಿರಾಮ: 1:00 PM - 4:00 PM; OPD ಸಮಯ: 9:00 AM-1:00 PM ಮತ್ತು 4:00 PM-8:00 PM). ${targetDate} ಗೆ ಲಭ್ಯವಿರುವ ಹತ್ತಿರದ ಸಂಜೆ ಸ್ಲಾಟ್‌ಗಳು: ${nearestSlots}. ಇವುಗಳಲ್ಲಿ ಒಂದನ್ನು ದೃಢೀಕರಿಸಲು ಬಯಸುವಿರಾ?`;
+      } else {
+        breakReply = `City Health Clinic is closed at ${requestedTime.display} (our OPD break is 1:00 PM to 4:00 PM; regular OPD hours are Mon–Sat 9:00 AM–1:00 PM and 4:00 PM–8:00 PM). The nearest available slots on ${targetDate} are: ${nearestSlots}. Would you like to confirm one of these?`;
+      }
+
+      await db.createMessage({
+        conversation_id: convId,
+        sender: 'bot',
+        text: breakReply,
+        language: langDetection.language,
+        intent: 'booking_create',
+        decision: 'act',
+        confidence: 1.0,
+        kb_refs: ['booking_rules'],
+        provider: 'deterministic_booking_engine',
+      });
+
+      return {
+        conversationId: convId,
+        text: breakReply,
+        decision: 'act',
+        intent: 'booking_create',
+        provider: 'deterministic_booking_engine',
+        quickReplies: avail.slots.slice(0, 3).map((s) => `Confirm ${s.time} on ${targetDate} (${serviceName})`),
+      };
+    }
+
+    // Item 3: Handle early morning requests (< 9:00 AM)
+    if (requestedTime && requestedTime.isEarly) {
+      const avail = await checkAvailability({
+        businessId,
+        service: serviceName,
+        dateStr: targetDate,
+        timeWindow: 'morning',
+      });
+      const nearestSlots = avail.slots.slice(0, 3).map((s) => s.time).join(', ');
+      
+      let earlyReply = '';
+      if (langDetection.language === 'hi') {
+        earlyReply = `City Health Clinic ${requestedTime.display} baje band rehta hai (morning OPD 9:00 AM baje shuru hota hai). ${targetDate} ke liye nearest available slots yeh hain: ${nearestSlots}. Kya aap inme se koi book karna chahte hain?`;
+      } else if (langDetection.language === 'kn') {
+        earlyReply = `City Health Clinic ${requestedTime.display} ಗಂಟೆಗೆ ಮುಚ್ಚಿರುತ್ತದೆ (ಬೆಳಿಗ್ಗೆ OPD 9:00 AM ಕ್ಕೆ ಪ್ರಾರಂಭವಾಗುತ್ತದೆ). ${targetDate} ಗೆ ಲಭ್ಯವಿರುವ ಹತ್ತಿರದ ಸ್ಲಾಟ್‌ಗಳು: ${nearestSlots}. ಇವುಗಳಲ್ಲಿ ಒಂದನ್ನು ದೃಢೀಕರಿಸಲು ಬಯಸುವಿರಾ?`;
+      } else {
+        earlyReply = `City Health Clinic is closed at ${requestedTime.display} (morning OPD opens at 9:00 AM). The nearest available morning slots on ${targetDate} are: ${nearestSlots}. Would you like to confirm one of these?`;
+      }
+
+      await db.createMessage({
+        conversation_id: convId,
+        sender: 'bot',
+        text: earlyReply,
+        language: langDetection.language,
+        intent: 'booking_create',
+        decision: 'act',
+        confidence: 1.0,
+        kb_refs: ['booking_rules'],
+        provider: 'deterministic_booking_engine',
+      });
+
+      return {
+        conversationId: convId,
+        text: earlyReply,
+        decision: 'act',
+        intent: 'booking_create',
+        provider: 'deterministic_booking_engine',
+        quickReplies: avail.slots.slice(0, 3).map((s) => `Confirm ${s.time} on ${targetDate} (${serviceName})`),
+      };
+    }
+
+    // Item 3: Handle after-closing / late night requests (>= 8:00 PM)
+    if (requestedTime && requestedTime.isClosed) {
+      const avail = await checkAvailability({
+        businessId,
+        service: serviceName,
+        dateStr: targetDate,
+        timeWindow: 'morning',
+      });
+      const nearestSlots = avail.slots.slice(0, 3).map((s) => s.time).join(', ');
+      
+      let closedReply = '';
+      if (langDetection.language === 'hi') {
+        closedReply = `City Health Clinic ${requestedTime.display} baje band rehta hai (evening OPD 8:00 PM baje band hota hai). Agle OPD session ke liye nearest available slots yeh hain: ${nearestSlots}. Kya aap inme se koi book karna chahte hain?`;
+      } else if (langDetection.language === 'kn') {
+        closedReply = `City Health Clinic ${requestedTime.display} ಗಂಟೆಗೆ ಮುಚ್ಚಿರುತ್ತದೆ (ಸಂಜೆ OPD 8:00 PM ಕ್ಕೆ ಮುಕ್ತಾಯವಾಗುತ್ತದೆ). ಲಭ್ಯವಿರುವ ಹತ್ತಿರದ ಸ್ಲಾಟ್‌ಗಳು: ${nearestSlots}. ಇವುಗಳಲ್ಲಿ ಒಂದನ್ನು ದೃಢೀಕರಿಸಲು ಬಯಸುವಿರಾ?`;
+      } else {
+        closedReply = `City Health Clinic is closed at ${requestedTime.display} (evening OPD closes at 8:00 PM). The nearest available slots on our next OPD session are: ${nearestSlots}. Would you like to confirm one of these?`;
+      }
+
+      await db.createMessage({
+        conversation_id: convId,
+        sender: 'bot',
+        text: closedReply,
+        language: langDetection.language,
+        intent: 'booking_create',
+        decision: 'act',
+        confidence: 1.0,
+        kb_refs: ['booking_rules'],
+        provider: 'deterministic_booking_engine',
+      });
+
+      return {
+        conversationId: convId,
+        text: closedReply,
+        decision: 'act',
+        intent: 'booking_create',
+        provider: 'deterministic_booking_engine',
+        quickReplies: avail.slots.slice(0, 3).map((s) => `Confirm ${s.time} on ${targetDate} (${serviceName})`),
+      };
+    }
 
     const avail = await checkAvailability({
       businessId,
@@ -440,14 +681,64 @@ export async function processMessage(params: {
         name: 'General Physician Consultation',
       };
 
-    const booking = await confirmBooking({
-      businessId,
-      customerId,
-      service: matchedService.name,
-      startTimeIso: `${bookingDate}T10:00:00.000Z`,
-      endTimeIso: `${bookingDate}T10:30:00.000Z`,
-      notes: `Booked via Web Chat for ${senderName || 'Patient'}`,
-    });
+    let startIso = `${bookingDate}T10:00:00.000Z`;
+    let endIso = `${bookingDate}T10:30:00.000Z`;
+    const timeMatch = chosenTime.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+    if (timeMatch) {
+      let h = parseInt(timeMatch[1], 10);
+      const m = timeMatch[2] ? parseInt(timeMatch[2], 10) : 0;
+      const p = timeMatch[3]?.toLowerCase();
+      if (p === 'pm' && h < 12) h += 12;
+      if (p === 'am' && h === 12) h = 0;
+      startIso = `${bookingDate}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00.000Z`;
+      const dur = matchedService.duration_mins || 30;
+      const totalM = h * 60 + m + dur;
+      const endH = Math.floor(totalM / 60);
+      const endM = totalM % 60;
+      endIso = `${bookingDate}T${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}:00.000Z`;
+    }
+
+    let booking: any;
+    try {
+      booking = await confirmBooking({
+        businessId,
+        customerId,
+        service: matchedService.name,
+        startTimeIso: startIso,
+        endTimeIso: endIso,
+        notes: `Booked via Web Chat for ${senderName || 'Patient'}`,
+      });
+    } catch (bookingErr: any) {
+      const avail = await checkAvailability({
+        businessId,
+        service: matchedService.name,
+        dateStr: bookingDate,
+        timeWindow: 'any',
+      });
+      const altTimesStr = avail.slots.map((s) => s.time).join(', ');
+      const occupiedReply = `Sorry, that ${chosenTime} slot was just taken by another patient! Here are the next available slots for ${matchedService.name} on ${bookingDate}: ${altTimesStr || 'No further slots available today'}. Would you like to select one of these?`;
+
+      await db.createMessage({
+        conversation_id: convId,
+        sender: 'bot',
+        text: occupiedReply,
+        language: langDetection.language,
+        intent: 'booking_create',
+        decision: 'act',
+        confidence: 0.95,
+        kb_refs: ['booking_rules'],
+        provider: 'deterministic_booking_engine',
+      });
+
+      return {
+        conversationId: convId,
+        text: occupiedReply,
+        decision: 'act',
+        intent: 'booking_create',
+        provider: 'deterministic_booking_engine',
+        quickReplies: avail.slots.map((s) => `Confirm ${s.time} on ${bookingDate} (${matchedService.name})`),
+      };
+    }
 
     const confirmedReply = getLocalizedTemplate('booking_confirmed', dialect, {
       id: booking.id.toUpperCase(),
