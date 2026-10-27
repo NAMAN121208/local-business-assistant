@@ -10,9 +10,10 @@ import {
   Escalation,
   ConversationStatus,
   BookingStatus,
+  EscalationStatus,
 } from './types';
 
-// In-memory fallback cache when Supabase credentials are not set
+// In-memory fallback cache when Supabase credentials are not set (for local dev)
 const memoryStore = {
   businesses: new Map<string, Business>(),
   kbVersions: new Map<string, KnowledgeBaseVersion[]>(),
@@ -25,8 +26,20 @@ const memoryStore = {
 
 function getSupabase(): SupabaseClient | null {
   const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const key =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  const isProduction = process.env.NODE_ENV === 'production';
+  const isMemoryPermitted = process.env.USE_MEMORY_DB === 'true';
+
   if (!url || !key) {
+    if (isProduction && !isMemoryPermitted) {
+      console.error(
+        '[FATAL DB ERROR] Production environment requires Supabase credentials! SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_ANON_KEY) must be provided in Vercel environment variables.'
+      );
+    }
     return null;
   }
   return createClient(url, key);
@@ -42,7 +55,9 @@ export class DBClient {
   // --- BUSINESS ---
   async getBusiness(id?: string): Promise<Business | null> {
     if (this.supabase) {
-      const query = id ? this.supabase.from('businesses').select('*').eq('id', id).single() : this.supabase.from('businesses').select('*').limit(1).single();
+      const query = id
+        ? this.supabase.from('businesses').select('*').eq('id', id).maybeSingle()
+        : this.supabase.from('businesses').select('*').limit(1).maybeSingle();
       const { data, error } = await query;
       if (!error && data) return data as Business;
     }
@@ -67,20 +82,40 @@ export class DBClient {
   }
 
   // --- KNOWLEDGE BASE ---
+  /**
+   * Always loads the latest APPROVED knowledge base version.
+   * Unapproved drafts are not used by the customer bot.
+   */
   async getLatestKnowledgeBase(businessId: string): Promise<KnowledgeBaseVersion | null> {
     if (this.supabase) {
       const { data, error } = await this.supabase
         .from('knowledge_base_versions')
         .select('*')
         .eq('business_id', businessId)
+        .eq('approved_by_owner', true)
         .order('version', { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
       if (!error && data) return data as KnowledgeBaseVersion;
     }
-    const versions = memoryStore.kbVersions.get(businessId) || [];
+    const versions = (memoryStore.kbVersions.get(businessId) || []).filter(
+      (v) => v.approved_by_owner === true
+    );
     if (versions.length === 0) return null;
     return versions.reduce((prev, curr) => (curr.version > prev.version ? curr : prev));
+  }
+
+  async getAllKnowledgeBaseVersions(businessId: string): Promise<KnowledgeBaseVersion[]> {
+    if (this.supabase) {
+      const { data, error } = await this.supabase
+        .from('knowledge_base_versions')
+        .select('*')
+        .eq('business_id', businessId)
+        .order('version', { ascending: false });
+      if (!error && data) return data as KnowledgeBaseVersion[];
+    }
+    const versions = memoryStore.kbVersions.get(businessId) || [];
+    return [...versions].sort((a, b) => b.version - a.version);
   }
 
   async saveKnowledgeBaseVersion(kb: KnowledgeBaseVersion): Promise<KnowledgeBaseVersion> {
@@ -101,7 +136,7 @@ export class DBClient {
   // --- CUSTOMER ---
   async getCustomer(id: string): Promise<Customer | null> {
     if (this.supabase) {
-      const { data, error } = await this.supabase.from('customers').select('*').eq('id', id).single();
+      const { data, error } = await this.supabase.from('customers').select('*').eq('id', id).maybeSingle();
       if (!error && data) return data as Customer;
     }
     return memoryStore.customers.get(id) || null;
@@ -115,7 +150,7 @@ export class DBClient {
         .eq('business_id', businessId)
         .eq('contact', contact)
         .limit(1)
-        .single();
+        .maybeSingle();
       if (!error && data) return data as Customer;
     }
     for (const cust of memoryStore.customers.values()) {
@@ -138,7 +173,7 @@ export class DBClient {
   // --- CONVERSATION ---
   async getConversation(id: string): Promise<Conversation | null> {
     if (this.supabase) {
-      const { data, error } = await this.supabase.from('conversations').select('*').eq('id', id).single();
+      const { data, error } = await this.supabase.from('conversations').select('*').eq('id', id).maybeSingle();
       if (!error && data) return data as Conversation;
     }
     return memoryStore.conversations.get(id) || null;
@@ -188,8 +223,30 @@ export class DBClient {
     }
   }
 
+  async getAllConversations(
+    businessId: string,
+    filter?: { status?: ConversationStatus }
+  ): Promise<Conversation[]> {
+    if (this.supabase) {
+      let query = this.supabase
+        .from('conversations')
+        .select('*')
+        .eq('business_id', businessId)
+        .order('updated_at', { ascending: false });
+      if (filter?.status) {
+        query = query.eq('status', filter.status);
+      }
+      const { data, error } = await query;
+      if (!error && data) return data as Conversation[];
+    }
+    const all = Array.from(memoryStore.conversations.values()).filter(
+      (c) => c.business_id === businessId && (!filter?.status || c.status === filter.status)
+    );
+    return all.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+  }
+
   // --- MESSAGE ---
-  async getRecentMessages(conversationId: string, limit: number = 10): Promise<Message[]> {
+  async getRecentMessages(conversationId: string, limit: number = 20): Promise<Message[]> {
     if (this.supabase) {
       const { data, error } = await this.supabase
         .from('messages')
@@ -203,7 +260,9 @@ export class DBClient {
     return list.slice(-limit);
   }
 
-  async createMessage(msg: Omit<Message, 'id' | 'created_at'> & { id?: string; created_at?: string }): Promise<Message> {
+  async createMessage(
+    msg: Omit<Message, 'id' | 'created_at'> & { id?: string; created_at?: string }
+  ): Promise<Message> {
     const fullMsg: Message = {
       id: msg.id || `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       conversation_id: msg.conversation_id,
@@ -227,11 +286,19 @@ export class DBClient {
     const list = memoryStore.messages.get(fullMsg.conversation_id) || [];
     list.push(fullMsg);
     memoryStore.messages.set(fullMsg.conversation_id, list);
+
+    // Touch conversation updated_at
+    const conv = memoryStore.conversations.get(fullMsg.conversation_id);
+    if (conv) {
+      conv.updated_at = fullMsg.created_at;
+    }
     return fullMsg;
   }
 
   // --- BOOKING ---
-  async createBooking(booking: Omit<Booking, 'id' | 'created_at'> & { id?: string; created_at?: string }): Promise<Booking> {
+  async createBooking(
+    booking: Omit<Booking, 'id' | 'created_at'> & { id?: string; created_at?: string }
+  ): Promise<Booking> {
     const fullBooking: Booking = {
       id: booking.id || `bk_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       business_id: booking.business_id,
@@ -241,6 +308,7 @@ export class DBClient {
       end_time: booking.end_time,
       status: booking.status || 'confirmed',
       notes: booking.notes || null,
+      is_read: false,
       created_at: booking.created_at || new Date().toISOString(),
     };
 
@@ -258,14 +326,18 @@ export class DBClient {
     filters?: { date?: string; customerId?: string; status?: BookingStatus }
   ): Promise<Booking[]> {
     if (this.supabase) {
-      let query = this.supabase.from('bookings').select('*').eq('business_id', businessId);
+      let query = this.supabase
+        .from('bookings')
+        .select('*')
+        .eq('business_id', businessId)
+        .order('start_time', { ascending: true });
       if (filters?.customerId) query = query.eq('customer_id', filters.customerId);
       if (filters?.status) query = query.eq('status', filters.status);
       const { data, error } = await query;
       if (!error && data) {
         let res = data as Booking[];
         if (filters?.date) {
-          res = res.filter(b => b.start_time.startsWith(filters.date!));
+          res = res.filter((b) => b.start_time.startsWith(filters.date!));
         }
         return res;
       }
@@ -279,7 +351,7 @@ export class DBClient {
       if (filters?.date && !b.start_time.startsWith(filters.date)) continue;
       list.push(b);
     }
-    return list;
+    return list.sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
   }
 
   async cancelBooking(id: string): Promise<boolean> {
@@ -296,6 +368,16 @@ export class DBClient {
     return false;
   }
 
+  async markBookingRead(id: string): Promise<void> {
+    if (this.supabase) {
+      await this.supabase.from('bookings').update({ is_read: true }).eq('id', id);
+    }
+    const b = memoryStore.bookings.get(id);
+    if (b) {
+      b.is_read = true;
+    }
+  }
+
   // --- ESCALATION ---
   async createEscalation(
     esc: Omit<Escalation, 'id' | 'created_at'> & { id?: string; created_at?: string }
@@ -307,6 +389,7 @@ export class DBClient {
       ai_summary: esc.ai_summary,
       suggested_reply: esc.suggested_reply,
       status: esc.status || 'open',
+      is_read: false,
       resolved_at: esc.resolved_at || null,
       created_at: esc.created_at || new Date().toISOString(),
     };
@@ -332,7 +415,57 @@ export class DBClient {
       if (conversationId && esc.conversation_id !== conversationId) continue;
       list.push(esc);
     }
-    return list;
+    return list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  }
+
+  async markEscalationRead(id: string): Promise<void> {
+    if (this.supabase) {
+      await this.supabase.from('escalations').update({ is_read: true }).eq('id', id);
+    }
+    const e = memoryStore.escalations.get(id);
+    if (e) {
+      e.is_read = true;
+    }
+  }
+
+  async resolveEscalation(id: string): Promise<void> {
+    const now = new Date().toISOString();
+    if (this.supabase) {
+      await this.supabase.from('escalations').update({ status: 'resolved', resolved_at: now }).eq('id', id);
+    }
+    const e = memoryStore.escalations.get(id);
+    if (e) {
+      e.status = 'resolved';
+      e.resolved_at = now;
+    }
+  }
+
+  // --- UNREAD & NOTIFICATION STATS ---
+  async getOwnerDashboardStats(businessId: string): Promise<{
+    needsHumanCount: number;
+    unreadBookingsCount: number;
+    unreadEscalationsCount: number;
+    totalBookingsToday: number;
+  }> {
+    const conversations = await this.getAllConversations(businessId);
+    const needsHumanCount = conversations.filter((c) => c.status === 'needs_human').length;
+
+    const escalations = await this.getEscalations();
+    const unreadEscalationsCount = escalations.filter((e) => e.status === 'open' && !e.is_read).length;
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const bookings = await this.findBookings(businessId);
+    const unreadBookingsCount = bookings.filter((b) => !b.is_read).length;
+    const totalBookingsToday = bookings.filter(
+      (b) => b.start_time.startsWith(todayStr) && b.status === 'confirmed'
+    ).length;
+
+    return {
+      needsHumanCount,
+      unreadBookingsCount,
+      unreadEscalationsCount,
+      totalBookingsToday,
+    };
   }
 }
 

@@ -50,11 +50,13 @@ export interface KnowledgeBaseContent {
     type: string;
     address: string;
     phone: string;
-    emergency_phone: string;
+    emergency_phone?: string;
     hours: Record<string, string>;
     consulting_doctors?: string[];
     specialties?: string[];
     landmark?: string;
+    payment_methods?: string;
+    parking?: string;
     [key: string]: any;
   };
   services: ServiceItem[];
@@ -63,6 +65,7 @@ export interface KnowledgeBaseContent {
   escalation_rules: string[];
   never_answer: string[];
   holidays: string[]; // YYYY-MM-DD
+  tone?: string;
 }
 
 export interface KnowledgeBaseVersion {
@@ -72,6 +75,8 @@ export interface KnowledgeBaseVersion {
   content: KnowledgeBaseContent;
   raw_source_text?: string | null;
   approved_by_owner: boolean;
+  missing_info?: string[];
+  changelog?: any[];
   created_at: string;
 }
 
@@ -135,6 +140,7 @@ export interface Booking {
   end_time: string;   // ISO
   status: BookingStatus;
   notes?: string | null;
+  is_read?: boolean;
   created_at: string;
 }
 
@@ -147,6 +153,7 @@ export interface Escalation {
   ai_summary: string;
   suggested_reply: string;
   status: EscalationStatus;
+  is_read?: boolean;
   resolved_at?: string | null;
   created_at: string;
 }
