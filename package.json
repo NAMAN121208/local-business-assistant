@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "test:llm": "tsx scripts/test-llm.ts",
-    "test:bot": "tsx scripts/test-bot.ts"
+    "test:bot": "tsx scripts/test-bot.ts",
+    "test:owner": "tsx scripts/test-owner.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.48.1",

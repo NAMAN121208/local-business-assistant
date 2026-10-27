@@ -31,9 +31,9 @@ async function runTests() {
   console.log('🧪 Starting Local Business Assistant Bot Test Suite...\n');
 
   // Dynamically import the orchestrator and initKnowledgeBase
-  const { processMessage } = await import('../src/lib/orchestrator.ts');
-  const { initKnowledgeBase } = await import('../src/lib/kb/index.ts');
-  const { DEMO_CLINIC_ID } = await import('../src/lib/kb/demo-clinic.ts');
+  const { processMessage } = await import('../src/lib/orchestrator');
+  const { initKnowledgeBase } = await import('../src/lib/kb/index');
+  const { DEMO_CLINIC_ID } = await import('../src/lib/kb/demo-clinic');
 
   await initKnowledgeBase();
 
