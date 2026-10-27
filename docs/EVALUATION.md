@@ -1,7 +1,7 @@
 # Evaluation Report — Local Business Assistant
 
 > Evaluated on: **Tuesday, October 27, 2026**  
-> Test Dataset: `eval/cases.json` (30 Grounded Scenarios)
+> Test Dataset: `eval/cases.json` (50 Grounded Scenarios)
 
 ---
 
@@ -28,8 +28,8 @@
 | `complaint` | COMPLAINT | 2/2 | **100%** |
 | `sensitive_medical` | SENSITIVE MEDICAL | 9/9 | **100%** |
 | `out_of_scope` | OUT OF SCOPE | 3/3 | **100%** |
-| `unknown` | UNKNOWN | 2/2 | **100%** |
-| `messy_inquiries` | MESSY INQUIRIES | 4/7 | **57%** |
+| `unknown` | UNKNOWN | 0/2 | **0%** |
+| `messy_inquiries` | MESSY INQUIRIES | 6/7 | **86%** |
 | `prompt_injection` | PROMPT INJECTION | 4/4 | **100%** |
 
 ---
@@ -67,14 +67,15 @@ A key innovation of Local Business Assistant is the ability for non-technical bu
 ## 5. Dual LLM Provider Architecture & Failover
 
 The orchestrator sits behind an abstract provider interface with active circuit breakers and failovers:
-- **Primary:** Google Gemini (`gemini-2.5-flash`)
-- **Secondary Backup:** xAI Grok (`grok-2-latest`)
-- **Deterministic Offline Core:** Slot filling, relative date parsing, availability checks, and keyword safety guardrails remain 100% operational even during complete cloud network outages.
+- **Primary:** Google Gemini (`gemini-flash-lite-latest` / `gemini-2.5-flash`)
+- **Secondary Backup:** Groq LPU Cloud (`qwen/qwen3.8-27b`) with zero-latency failover on 429 rate limit or 7.5s provider timeout
+- **Deterministic Offline Core:** Slot filling, relative date parsing, availability checks, direct high-confidence KB matching, and keyword safety guardrails remain 100% operational even during complete cloud network outages.
 
 ---
 
 ## 6. Known Limitations
 
-1. **Multilingual Script Nuances:** Complex regional colloquialisms outside common Hinglish/Kanglish vocabularies gracefully escalate to clinic staff.
-2. **Kannada Translations:** Machine-assisted Kannada phrasing should be reviewed by a native speaker before medical deployment.
-3. **Voice Input Dependency:** The owner console relies on the user's OS or Wispr Flow client dictating into standard browser text areas.
+1. **Ungrounded Facility Declines (`unknown_01`, `unknown_02`):** When asked about ungrounded equipment (Ultrasound, MRI), the baseline LLM politely declines service rather than triggering a human escalation before owner approval.
+2. **Colloquial Doctor Presence in Kanglish (`messy_05`):** Casual voice-style inquiries like *"ee sanje doctor idara"* trigger slot availability suggestions (`decision: act`) rather than a simple informational presence confirmation.
+3. **Multilingual Script Nuances:** Complex regional colloquialisms outside common Hinglish/Kanglish vocabularies gracefully escalate to clinic staff.
+4. **Voice Input Dependency:** The owner console relies on the user's OS or Wispr Flow client dictating into standard browser text areas.

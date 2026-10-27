@@ -44,6 +44,7 @@ interface CaseResult {
   expectedDecision: string;
   actualDecision: string;
   provider: string;
+  failedOver?: boolean;
   passed: boolean;
   actualReply: string;
   isSafetyViolation: boolean;
@@ -66,9 +67,13 @@ async function runEvaluation() {
   // Always reset to pristine Version 1 at the beginning of the evaluation suite
   await db.saveKnowledgeBaseVersion(demoClinicKBVersion);
 
-  function getPathLabel(provider: string): string {
-    if (provider === 'gemini' || provider === 'grok') {
-      return `[Path: LLM (${provider})]`;
+  function getPathLabel(provider: string, failedOver?: boolean): string {
+    const failoverTag = failedOver ? ' [FAILOVER]' : '';
+    if (provider === 'gemini') {
+      return `[Path: LLM (gemini)]${failoverTag}`;
+    }
+    if (provider === 'groq' || provider === 'grok') {
+      return `[Path: LLM (groq)]${failedOver ? ' [FAILOVER from Gemini]' : ''}`;
     }
     if (provider === 'deterministic_guardrail') {
       return `[Path: Deterministic Guardrail (Layer 1 Keyword Heuristic)]`;
@@ -82,7 +87,7 @@ async function runEvaluation() {
     if (provider === 'fallback' || provider === 'needs_human_hold') {
       return `[Path: Safe Fallback / Human Escalation]`;
     }
-    return `[Path: Other (${provider})]`;
+    return `[Path: Other (${provider})]${failoverTag}`;
   }
 
   await initKnowledgeBase();
@@ -106,15 +111,35 @@ async function runEvaluation() {
     }
     categoryStats[tc.category].total++;
 
+    // Short pacing between cases to respect cloud LLM rate limit quotas (1200ms)
+    if (i > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+    }
+
     const convId = `eval_${tc.id}_${Date.now()}`;
     const start = Date.now();
 
     try {
-      const res = await processMessage({
-        businessId: DEMO_CLINIC_ID,
-        conversationId: convId,
-        text: tc.message,
-      });
+      let res: any;
+      let attempts = 0;
+      while (attempts < 3) {
+        attempts++;
+        try {
+          res = await processMessage({
+            businessId: DEMO_CLINIC_ID,
+            conversationId: convId,
+            text: tc.message,
+          });
+          break;
+        } catch (e: any) {
+          if ((e.status === 429 || e.message?.includes('429')) && attempts < 3) {
+            console.warn(`      ⚠️ 429 Rate Limit encountered during eval case ${tc.id}. Backing off 2500ms before retry...`);
+            await new Promise((r) => setTimeout(r, 2500));
+          } else {
+            throw e;
+          }
+        }
+      }
 
       const latency = Date.now() - start;
       const passedDecision = res.decision === tc.expectedDecision;
@@ -135,6 +160,7 @@ async function runEvaluation() {
         expectedDecision: tc.expectedDecision,
         actualDecision: res.decision,
         provider: res.provider,
+        failedOver: res.failedOver,
         passed: passedDecision && !isSafetyViolation,
         actualReply: res.text,
         isSafetyViolation,
@@ -151,7 +177,7 @@ async function runEvaluation() {
         `[${i + 1}/${cases.length}] ${statusIcon} [${tc.category}] "${tc.name}"`
       );
       console.log(
-        `      Expected: ${tc.expectedDecision} | Actual: ${res.decision} | ${getPathLabel(res.provider)} (${latency}ms)`
+        `      Expected: ${tc.expectedDecision} | Actual: ${res.decision} | ${getPathLabel(res.provider, res.failedOver)} (${latency}ms)`
       );
       if (!caseResult.passed) {
         console.log(`      ⚠️ Reply Preview: ${res.text.slice(0, 100)}...`);
@@ -240,8 +266,9 @@ async function runEvaluation() {
   console.log(`Overall Accuracy: ${overallAccuracy}% (${passedCases}/${totalCases} passed)`);
   console.log(`Safety Metric (Medical/Out-of-Scope answer violations): ${safetyViolations} (Target: 0)`);
 
-  const llmCount = results.filter((r) => r.provider === 'gemini' || r.provider === 'grok').length;
+  const llmCount = results.filter((r) => r.provider === 'gemini' || r.provider === 'groq' || r.provider === 'grok').length;
   const llmPct = Math.round((llmCount / totalCases) * 100);
+  const failoverCount = results.filter((r) => r.failedOver || r.provider === 'groq' || r.provider === 'grok').length;
   const deterministicCount = results.filter((r) => r.provider.startsWith('deterministic_')).length;
   const kbDirectCount = results.filter((r) => r.provider === 'kb_direct').length;
   const fallbackCount = results.filter(
@@ -249,7 +276,10 @@ async function runEvaluation() {
   ).length;
 
   console.log('\nExecution Path Distribution:');
-  console.log(`  - Real LLM Calls (Gemini/Grok): ${llmCount}/${totalCases} (${llmPct}%)`);
+  console.log(`  - Real LLM Calls (Gemini/Groq): ${llmCount}/${totalCases} (${llmPct}%)`);
+  if (failoverCount > 0) {
+    console.log(`    ↳ Automatic Failover to Groq: ${failoverCount} cases`);
+  }
   console.log(
     `  - Deterministic Guardrails & Engine: ${deterministicCount}/${totalCases} (${Math.round(
       (deterministicCount / totalCases) * 100
@@ -304,7 +334,7 @@ async function runEvaluation() {
     month: 'long',
     day: 'numeric',
   })}**  
-> Test Dataset: \`eval/cases.json\` (30 Grounded Scenarios)
+> Test Dataset: \`eval/cases.json\` (${totalCases} Grounded Scenarios)
 
 ---
 
@@ -373,17 +403,18 @@ A key innovation of Local Business Assistant is the ability for non-technical bu
 ## 5. Dual LLM Provider Architecture & Failover
 
 The orchestrator sits behind an abstract provider interface with active circuit breakers and failovers:
-- **Primary:** Google Gemini (\`gemini-2.5-flash\`)
-- **Secondary Backup:** xAI Grok (\`grok-2-latest\`)
-- **Deterministic Offline Core:** Slot filling, relative date parsing, availability checks, and keyword safety guardrails remain 100% operational even during complete cloud network outages.
+- **Primary:** Google Gemini (\`gemini-flash-lite-latest\` / \`gemini-2.5-flash\`)
+- **Secondary Backup:** Groq LPU Cloud (\`qwen/qwen3.8-27b\`) with zero-latency failover on 429 rate limit or 7.5s provider timeout
+- **Deterministic Offline Core:** Slot filling, relative date parsing, availability checks, direct high-confidence KB matching, and keyword safety guardrails remain 100% operational even during complete cloud network outages.
 
 ---
 
 ## 6. Known Limitations
 
-1. **Multilingual Script Nuances:** Complex regional colloquialisms outside common Hinglish/Kanglish vocabularies gracefully escalate to clinic staff.
-2. **Kannada Translations:** Machine-assisted Kannada phrasing should be reviewed by a native speaker before medical deployment.
-3. **Voice Input Dependency:** The owner console relies on the user's OS or Wispr Flow client dictating into standard browser text areas.
+1. **Ungrounded Facility Declines (\`unknown_01\`, \`unknown_02\`):** When asked about ungrounded equipment (Ultrasound, MRI), the baseline LLM politely declines service rather than triggering a human escalation before owner approval.
+2. **Colloquial Doctor Presence in Kanglish (\`messy_05\`):** Casual voice-style inquiries like *"ee sanje doctor idara"* trigger slot availability suggestions (\`decision: act\`) rather than a simple informational presence confirmation.
+3. **Multilingual Script Nuances:** Complex regional colloquialisms outside common Hinglish/Kanglish vocabularies gracefully escalate to clinic staff.
+4. **Voice Input Dependency:** The owner console relies on the user's OS or Wispr Flow client dictating into standard browser text areas.
 `;
 
   fs.writeFileSync(path.resolve(process.cwd(), 'docs/EVALUATION.md'), evaluationMarkdown);
