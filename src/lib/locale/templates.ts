@@ -27,44 +27,75 @@ export interface NeedsHumanParams {
   emergencyPhone: string;
 }
 
+export function formatHumanDate(dateInput: string, dialect: Dialect = 'en'): string {
+  if (!dateInput) return dateInput;
+  const match = dateInput.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return dateInput;
+
+  const year = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10) - 1;
+  const day = parseInt(match[3], 10);
+
+  const d = new Date(Date.UTC(year, month, day, 12, 0, 0));
+  const dayOfWeek = d.getUTCDay();
+
+  const daysEn = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const monthsEn = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  const daysKn = ['ಭಾನು', 'ಸೋಮ', 'ಮಂಗಳ', 'ಬುಧ', 'ಗುರು', 'ಶುಕ್ರ', 'ಶನಿ'];
+  const monthsKn = ['ಜನ', 'ಫೆಬ್ರ', 'ಮಾರ್ಚ್', 'ಏಪ್ರಿ', 'ಮೇ', 'ಜೂನ್', 'ಜುಲೈ', 'ಆಗ', 'ಸೆಪ್ಟೆಂ', 'ಅಕ್ಟೋ', 'ನವೆಂ', 'ಡಿಸೆಂ'];
+
+  const daysHi = ['रवि', 'सोम', 'मंगल', 'बुध', 'गुरु', 'शुक्र', 'शनि'];
+  const monthsHi = ['जन', 'फ़र', 'मार्च', 'अप्रैल', 'मई', 'जून', 'जुलाई', 'अग', 'सित', 'अक्तू', 'नव', 'दिस'];
+
+  if (dialect === 'kn') {
+    return `${daysKn[dayOfWeek]}, ${day} ${monthsKn[month]}`;
+  } else if (dialect === 'hi') {
+    return `${daysHi[dayOfWeek]}, ${day} ${monthsHi[month]}`;
+  } else {
+    // en, hi_latin, kn_latin
+    return `${daysEn[dayOfWeek]}, ${day} ${monthsEn[month]}`;
+  }
+}
+
 export const TEMPLATES = {
   booking_slot_options: {
     en: (p: BookingSlotParams) =>
-      `We have slots available for Dr. Consultation on ${p.date} (${p.timeWindow}): ${p.slots}. Would you like to confirm one of these slots? Please reply with your preferred time and your name.`,
+      `We have slots available for Dr. Consultation on ${formatHumanDate(p.date, 'en')} (${p.timeWindow}): ${p.slots}. Would you like to confirm one of these slots? Please reply with your preferred time and your name.`,
     hi: (p: BookingSlotParams) =>
-      `हमारे पास ${p.date} (${p.timeWindow}) को डॉक्टर परामर्श के लिए स्लॉट उपलब्ध हैं: ${p.slots}। क्या आप इनमें से कोई स्लॉट बुक करना चाहते हैं? कृपया अपना पसंदीदा समय और नाम भेजें।`,
+      `हमारे पास ${formatHumanDate(p.date, 'hi')} (${p.timeWindow}) को डॉक्टर परामर्श के लिए स्लॉट उपलब्ध हैं: ${p.slots}। क्या आप इनमें से कोई स्लॉट बुक करना चाहते हैं? कृपया अपना पसंदीदा समय और नाम भेजें।`,
     hi_latin: (p: BookingSlotParams) =>
-      `City Health Clinic mein ${p.date} (${p.timeWindow}) ke liye doctor consultation ke slots available hain: ${p.slots}. Kya aap inme se koi slot book karna chahte hain? Kripya apna preferred time aur naam batayein.`,
+      `City Health Clinic mein ${formatHumanDate(p.date, 'hi_latin')} (${p.timeWindow}) ke liye doctor consultation ke slots available hain: ${p.slots}. Kya aap inme se koi slot book karna chahte hain? Kripya apna preferred time aur naam batayein.`,
     kn: (p: BookingSlotParams) =>
-      `ನಮ್ಮಲ್ಲಿ ${p.date} (${p.timeWindow}) ರಂದು ವೈದ್ಯರ ಸಮಾಲೋಚನೆಗಾಗಿ ಸ್ಲಾಟ್‌ಗಳು ಲಭ್ಯವಿವೆ: ${p.slots}. ನೀವು ಈ ಸ್ಲಾಟ್‌ಗಳಲ್ಲಿ ಒಂದನ್ನು ಖಚಿತಪಡಿಸಲು ಬಯಸುವಿರಾ? ದಯವಿಟ್ಟು ನಿಮ್ಮ ಸಮಯ ಮತ್ತು ಹೆಸರನ್ನು ತಿಳಿಸಿ.`,
+      `ನಮ್ಮಲ್ಲಿ ${formatHumanDate(p.date, 'kn')} (${p.timeWindow}) ರಂದು ವೈದ್ಯರ ಸಮಾಲೋಚನೆಗಾಗಿ ಸ್ಲಾಟ್‌ಗಳು ಲಭ್ಯವಿವೆ: ${p.slots}. ನೀವು ಈ ಸ್ಲಾಟ್‌ಗಳಲ್ಲಿ ಒಂದನ್ನು ಖಚಿತಪಡಿಸಲು ಬಯಸುವಿರಾ? ದಯವಿಟ್ಟು ನಿಮ್ಮ ಸಮಯ ಮತ್ತು ಹೆಸರನ್ನು ತಿಳಿಸಿ.`,
     kn_latin: (p: BookingSlotParams) =>
-      `City Health Clinic nalli ${p.date} (${p.timeWindow}) ge doctor consultation slots ide: ${p.slots}. Neevu ondu slot confirm madalu bayasuvira? Dayavittu nimma samaya mathu hesaru thilisi.`,
+      `City Health Clinic nalli ${formatHumanDate(p.date, 'kn_latin')} (${p.timeWindow}) ge doctor consultation slots ide: ${p.slots}. Neevu ondu slot confirm madalu bayasuvira? Dayavittu nimma samaya mathu hesaru thilisi.`,
   },
 
   booking_confirmed: {
     en: (p: BookingConfirmedParams) =>
-      `Your appointment has been confirmed!\n\nBooking ID: ${p.id}\nService: ${p.service}\nDate: ${p.date}\nTime: ${p.time}\nLocation: ${p.location}\n\nPlease arrive 10 minutes prior to your slot. Cancellation or rescheduling is free up to 2 hours in advance.`,
+      `Your appointment has been confirmed!\n\nBooking ID: ${p.id}\nService: ${p.service}\nDate: ${formatHumanDate(p.date, 'en')}\nTime: ${p.time}\nLocation: ${p.location}\n\nPlease arrive 10 minutes prior to your slot. Cancellation or rescheduling is free up to 2 hours in advance.`,
     hi: (p: BookingConfirmedParams) =>
-      `आपकी अपॉइंटमेंट सफलतापूर्वक कन्फर्म हो गई है!\n\nबुकिंग आईडी: ${p.id}\nसेवा: ${p.service}\nदिनांक: ${p.date}\nसमय: ${p.time}\nस्थान: ${p.location}\n\nकृपया अपने समय से 10 मिनट पहले पहुंचें। अपॉइंटमेंट से 2 घंटे पहले तक कैंसिलेशन निःशुल्क है।`,
+      `आपकी अपॉइंटमेंट सफलतापूर्वक कन्फर्म हो गई है!\n\nबुकिंग आईडी: ${p.id}\nसेवा: ${p.service}\nदिनांक: ${formatHumanDate(p.date, 'hi')}\nसमय: ${p.time}\nस्थान: ${p.location}\n\nकृपया अपने समय से 10 मिनट पहले पहुंचें। अपॉइंटमेंट से 2 घंटे पहले तक कैंसिलेशन निःशुल्क है।`,
     hi_latin: (p: BookingConfirmedParams) =>
-      `Aapka appointment confirm ho gaya hai!\n\nBooking ID: ${p.id}\nService: ${p.service}\nDate: ${p.date}\nTime: ${p.time}\nLocation: ${p.location}\n\nKripya apne time se 10 minute pehle pahuchein. Cancellation 2 ghante pehle tak free hai.`,
+      `Aapka appointment confirm ho gaya hai!\n\nBooking ID: ${p.id}\nService: ${p.service}\nDate: ${formatHumanDate(p.date, 'hi_latin')}\nTime: ${p.time}\nLocation: ${p.location}\n\nKripya apne time se 10 minute pehle pahuchein. Cancellation 2 ghante pehle tak free hai.`,
     kn: (p: BookingConfirmedParams) =>
-      `ನಿಮ್ಮ ಅಪಾಯಿಂಟ್‌ಮೆಂಟ್ ಯಶಸ್ವಿಯಾಗಿ ದೃಢಪಟ್ಟಿದೆ!\n\nಬುಕಿಂಗ್ ಐಡಿ: ${p.id}\nಸೇವೆ: ${p.service}\nದಿನಾಂಕ: ${p.date}\nಸಮಯ: ${p.time}\nಸ್ಥಳ: ${p.location}\n\nದಯವಿಟ್ಟು ನಿಮ್ಮ ಸ್ಲಾಟ್‌ಗಿಂತ 10 ನಿಮಿಷಗಳ ಮೊದಲು ಆಗಮಿಸಿ. ಅಪಾಯಿಂಟ್‌ಮೆಂಟ್‌ಗೆ 2 ಗಂಟೆಗಳ ಮೊದಲು ಉಚಿತ ರದ್ದತಿ ಲಭ್ಯವಿದೆ.`,
+      `ನಿಮ್ಮ ಅಪಾಯಿಂಟ್‌ಮೆಂಟ್ ಯಶಸ್ವಿಯಾಗಿ ದೃಢಪಟ್ಟಿದೆ!\n\nಬುಕಿಂಗ್ ಐಡಿ: ${p.id}\nಸೇವೆ: ${p.service}\nದಿನಾಂಕ: ${formatHumanDate(p.date, 'kn')}\nಸಮಯ: ${p.time}\nಸ್ಥಳ: ${p.location}\n\nದಯವಿಟ್ಟು ನಿಮ್ಮ ಸ್ಲಾಟ್‌ಗಿಂತ 10 ನಿಮಿಷಗಳ ಮೊದಲು ಆಗಮಿಸಿ. ಅಪಾಯಿಂಟ್‌ಮೆಂಟ್‌ಗೆ 2 ಗಂಟೆಗಳ ಮೊದಲು ಉಚಿತ ರದ್ದತಿ ಲಭ್ಯವಿದೆ.`,
     kn_latin: (p: BookingConfirmedParams) =>
-      `Nimma appointment confirm aagide!\n\nBooking ID: ${p.id}\nService: ${p.service}\nDate: ${p.date}\nTime: ${p.time}\nLocation: ${p.location}\n\nDayavittu 10 nimisha munche banni. Cancellation 2 gante munche free aagide.`,
+      `Nimma appointment confirm aagide!\n\nBooking ID: ${p.id}\nService: ${p.service}\nDate: ${formatHumanDate(p.date, 'kn_latin')}\nTime: ${p.time}\nLocation: ${p.location}\n\nDayavittu 10 nimisha munche banni. Cancellation 2 gante munche free aagide.`,
   },
 
   booking_unavailable: {
     en: (p: UnavailableParams) =>
-      `No available slots found for ${p.date}. Our regular OPD hours are Mon-Sat 9am-1pm and 4pm-8pm. Would you like to check the next working day?`,
+      `No available slots found for ${formatHumanDate(p.date, 'en')}. Our regular OPD hours are Mon-Sat 9am-1pm and 4pm-8pm. Would you like to check the next working day?`,
     hi: (p: UnavailableParams) =>
-      `${p.date} के लिए कोई स्लॉट उपलब्ध नहीं है। हमारे क्लिनिक का समय सोम-शनि सुबह 9 से 1 और शाम 4 से 8 बजे तक है। क्या आप अगले कार्यदिवस की जांच करना चाहते हैं?`,
+      `${formatHumanDate(p.date, 'hi')} के लिए कोई स्लॉट उपलब्ध नहीं है। हमारे क्लिनिक का समय सोम-शनि सुबह 9 से 1 और शाम 4 से 8 बजे तक है। क्या आप अगले कार्यदिवस की जांच करना चाहते हैं?`,
     hi_latin: (p: UnavailableParams) =>
-      `${p.date} ke liye koi slot available nahi hai. Clinic ke routine OPD timings Mon-Sat subah 9am-1pm aur shaam 4pm-8pm hain. Kya aap next working day check karna chahenge?`,
+      `${formatHumanDate(p.date, 'hi_latin')} ke liye koi slot available nahi hai. Clinic ke routine OPD timings Mon-Sat subah 9am-1pm aur shaam 4pm-8pm hain. Kya aap next working day check karna chahenge?`,
     kn: (p: UnavailableParams) =>
-      `${p.date} ರಂದು ಯಾವುದೇ ಸ್ಲಾಟ್‌ಗಳು ಲಭ್ಯವಿಲ್ಲ. ನಮ್ಮ ಕ್ಲಿನಿಕ್ ಸಮಯ ಸೋಮ-ಶನಿ ಬೆಳಿಗ್ಗೆ 9-1 ಮತ್ತು ಸಂಜೆ 4-8. ನೀವು ಮುಂದಿನ ದಿನವನ್ನು ಪರಿಶೀಲಿಸಲು ಬಯಸುವಿರಾ?`,
+      `${formatHumanDate(p.date, 'kn')} ರಂದು ಯಾವುದೇ ಸ್ಲಾಟ್‌ಗಳು ಲಭ್ಯವಿಲ್ಲ. ನಮ್ಮ ಕ್ಲಿನಿಕ್ ಸಮಯ ಸೋಮ-ಶನಿ ಬೆಳಿಗ್ಗೆ 9-1 ಮತ್ತು ಸಂಜೆ 4-8. ನೀವು ಮುಂದಿನ ದಿನವನ್ನು ಪರಿಶೀಲಿಸಲು ಬಯಸುವಿರಾ?`,
     kn_latin: (p: UnavailableParams) =>
-      `${p.date} ge yavude slot sigalilla. Clinic timings Mon-Sat beligge 9am-1pm mathu sanje 4pm-8pm. Neevu mundina dina check madalu bayasuvira?`,
+      `${formatHumanDate(p.date, 'kn_latin')} ge yavude slot sigalilla. Clinic timings Mon-Sat beligge 9am-1pm mathu sanje 4pm-8pm. Neevu mundina dina check madalu bayasuvira?`,
   },
 
   medical_holding: {

@@ -18,6 +18,7 @@ export interface OutgoingMessage {
   decision: 'answer' | 'act' | 'escalate';
   intent?: string;
   provider?: string;
+  failedOver?: boolean;
   quickReplies?: string[];
   metadata?: Record<string, any>;
 }

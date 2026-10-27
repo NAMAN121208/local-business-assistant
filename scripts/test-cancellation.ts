@@ -40,13 +40,13 @@ async function runCancellationTestSuite() {
 
   const bookingAfterAttack = await db.getBooking(testBooking.id);
   const attackBlocked =
-    res1.text.includes('Security verification failed') &&
+    res1.text.includes('Unable to verify booking details') &&
     bookingAfterAttack?.status === 'confirmed';
 
   if (!attackBlocked) {
     throw new Error('TEST 1 FAILED: Mismatched phone was allowed to cancel or modify another customer\'s booking!');
   }
-  console.log('  ✅ TEST 1 PASSED: Cross-customer cancellation blocked with security notice.\n');
+  console.log('  ✅ TEST 1 PASSED: Cross-customer cancellation blocked with generic verification error.\n');
 
   // Test 2: Legitimate customer cancellation with matching phone number
   console.log('--- TEST 2: Legitimate Cancellation (Matching Phone Number) ---');
@@ -90,8 +90,25 @@ async function runCancellationTestSuite() {
   }
   console.log('  ✅ TEST 3 PASSED: Patient given secure cancellation instructions and owner alerted.\n');
 
+  // Test 4: Information Leak / ID Oracle Protection (Non-existent booking ID)
+  console.log('--- TEST 4: Non-Existent Booking ID (Oracle Resistance) ---');
+  const res4 = await processMessage({
+    businessId: DEMO_CLINIC_ID,
+    conversationId: `conv_cancel_nonexistent_${Date.now()}`,
+    text: 'Cancel booking BK_FAKENOTFOUND999 9899988888',
+  });
+
+  console.log(`  Decision: ${res4.decision}`);
+  console.log(`  Reply: ${res4.text}\n`);
+
+  // Assert that non-existent ID returns the EXACT same message as a phone mismatch (no ID existence disclosure)
+  if (res4.text !== res1.text) {
+    throw new Error('TEST 4 FAILED: System leaked information by returning a different message for non-existent booking ID vs phone mismatch!');
+  }
+  console.log('  ✅ TEST 4 PASSED: Generic security message matches exactly between non-existent ID and phone mismatch (0 disclosure).\n');
+
   console.log('====================================================');
-  console.log('🎉 ALL 3 CANCELLATION TESTS PASSED CLEANLY!');
+  console.log('🎉 ALL 4 CANCELLATION TESTS PASSED CLEANLY!');
   console.log('====================================================');
 }
 

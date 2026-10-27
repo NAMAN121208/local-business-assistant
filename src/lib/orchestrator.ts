@@ -18,7 +18,7 @@ import {
 } from './booking';
 import { OutgoingMessage } from './channels';
 import { detectLanguage, Dialect } from './locale/detector';
-import { getLocalizedTemplate } from './locale/templates';
+import { getLocalizedTemplate, formatHumanDate } from './locale/templates';
 
 export interface ProcessMessageParams {
   businessId: string;
@@ -96,6 +96,161 @@ function isComplaintOrEscalation(text: string): { isEscalation: boolean; reason?
   }
 
   return { isEscalation: false };
+}
+
+function matchHighConfidenceFaq(
+  text: string,
+  kbData: any,
+  dialect: Dialect
+): { matched: boolean; reply: string; kbRef: string } | null {
+  const clean = text.toLowerCase().trim();
+
+  // Guard: complex, medical, insurance, multi-intent, booking, or complaint keywords must fall through to LLM or existing handlers
+  if (
+    clean.includes('emergency') ||
+    clean.includes('dr ') ||
+    clean.includes('doctor') ||
+    clean.includes('specialize') ||
+    clean.includes('specialis') ||
+    clean.includes('symptom') ||
+    clean.includes('medic') ||
+    clean.includes('fever') ||
+    clean.includes('pain') ||
+    clean.includes('cancel') ||
+    clean.includes('book') ||
+    clean.includes('appointment') ||
+    clean.includes('mother') ||
+    clean.includes('father') ||
+    clean.includes('family') ||
+    clean.includes('insurance') ||
+    clean.includes('mediclaim') ||
+    clean.includes('blood test') ||
+    clean.includes('lab') ||
+    clean.includes('mri') ||
+    clean.includes('ct scan') ||
+    clean.includes('x-ray') ||
+    clean.includes('ultrasound') ||
+    clean.includes('nearby') ||
+    clean.includes('cost of') ||
+    clean.includes('discount') ||
+    clean.includes('negotiat')
+  ) {
+    return null;
+  }
+
+  // 1. Timings & Working Hours
+  const isTimings =
+    /\b(clinic timings|opd hours|opening hours|clinic hours|working hours|samay kya|khulne ka samay|kab khula|kab band|kab khulta)\b/i.test(clean) ||
+    (/\b(timings|hours|timing)\b/i.test(clean) && /\b(clinic|opd|open|close|routine)\b/i.test(clean)) ||
+    (clean.includes('ಸಮಯ') && clean.includes('ತೆರೆದಿರುತ್ತದೆ'));
+
+  if (isTimings) {
+    let reply = '';
+    if (dialect === 'hi') {
+      reply = `सिटी हेल्थ क्लिनिक सोमवार से शनिवार सुबह 09:00 AM से 01:00 PM (मॉर्निंग ओपीडी) और शाम 04:00 PM से 08:00 PM (इवनिंग ओपीडी) खुला रहता है। रविवार को नियमित ओपीडी बंद रहती है।`;
+    } else if (dialect === 'hi_latin') {
+      reply = `City Health Clinic Monday se Saturday subah 09:00 AM se 01:00 PM (Morning OPD) aur shaam 04:00 PM se 08:00 PM (Evening OPD) tak khula rehta hai. Sunday ko routine appointments ke liye clinic band rehta hai.`;
+    } else if (dialect === 'kn') {
+      reply = `ಸಿಟಿ ಹೆಲ್ತ್ ಕ್ಲಿನಿಕ್ ಸೋಮವಾರದಿಂದ ಶನಿವಾರದವರೆಗೆ ಬೆಳಿಗ್ಗೆ 09:00 AM ರಿಂದ 01:00 PM (ಬೆಳಿಗ್ಗೆ OPD) ಮತ್ತು ಸಂಜೆ 04:00 PM ರಿಂದ 08:00 PM (ಸಂಜೆ OPD) ತೆರೆದಿರುತ್ತದೆ. ಭಾನುವಾರ ಸಾಮಾನ್ಯ ಅಪಾಯಿಂಟ್‌ಮೆಂಟ್‌ಗಳಿಗೆ ರಜೆ ಇರುತ್ತದೆ.`;
+    } else if (dialect === 'kn_latin') {
+      reply = `City Health Clinic Monday inda Saturday beligge 09:00 AM inda 01:00 PM mathu sanje 04:00 PM inda 08:00 PM therediruttade. Sunday routine OPD closed iruththe.`;
+    } else {
+      reply =
+        kbData.faqs.find((f: any) => f.id === 'faq_hours')?.answer ||
+        'The clinic is open Monday to Saturday from 09:00 AM to 01:00 PM (Morning OPD) and 04:00 PM to 08:00 PM (Evening OPD). Sunday is closed for routine appointments.';
+    }
+    return { matched: true, reply, kbRef: 'faq_hours' };
+  }
+
+  // 2. Location & Landmark
+  const isLocation =
+    /\b(where is|location|landmark|reach the clinic|clinic address|exact location|clinic kahan|kahan hai|elli ide|vilasa)\b/i.test(clean) &&
+    !clean.includes('parking') && !clean.includes('fee');
+
+  if (isLocation) {
+    let reply = '';
+    if (dialect === 'hi') {
+      reply = `सिटी हेल्थ क्लिनिक 42 1st Main, 7th Cross, Indiranagar, Bengaluru 560038 पर स्थित है, BDA Complex के सामने और Indiranagar Metro Station से 200 मीटर की दूरी पर।`;
+    } else if (dialect === 'hi_latin') {
+      reply = `City Health Clinic 42 1st Main, 7th Cross, Indiranagar, Bengaluru 560038 par sthit hai, BDA Complex ke samne aur Indiranagar Metro Station se 200m door.`;
+    } else if (dialect === 'kn') {
+      reply = `ಸಿಟಿ ಹೆಲ್ತ್ ಕ್ಲಿನಿಕ್ 42 1st Main, 7th Cross, Indiranagar, Bengaluru 560038 ನಲ್ಲಿದೆ (BDA Complex ಎದುರು ಮತ್ತು Indiranagar Metro Station ನಿಂದ 200 ಮೀಟರ್).`;
+    } else if (dialect === 'kn_latin') {
+      reply = `City Health Clinic 42 1st Main, 7th Cross, Indiranagar, Bengaluru 560038 nalli ide (BDA Complex mundhe, Indiranagar Metro Station inda 200m).`;
+    } else {
+      reply =
+        kbData.faqs.find((f: any) => f.id === 'faq_location')?.answer ||
+        'We are at 42 1st Main, 7th Cross, Indiranagar, Bengaluru 560038, opposite the BDA Complex and 200m from Indiranagar Metro Station.';
+    }
+    return { matched: true, reply, kbRef: 'faq_location' };
+  }
+
+  // 3. Four-Wheeler & Two-Wheeler Parking
+  const isParking =
+    /\b(car parking|four-wheeler parking|four wheeler parking|vehicle parking|parking available|parking facility|parking ki suvidha|parking ideya)\b/i.test(clean) ||
+    (clean.includes('parking') && (clean.includes('four-wheeler') || clean.includes('car') || clean.includes('available')));
+
+  if (isParking) {
+    let reply = '';
+    if (dialect === 'hi') {
+      reply = `क्लिनिक के सामने दोपहिया वाहनों (two-wheelers) के लिए समर्पित पार्किंग उपलब्ध है। चार पहिया वाहनों (cars/four-wheelers) के लिए 7th Cross पर सड़क किनारे पार्किंग उपलब्ध है।`;
+    } else if (dialect === 'hi_latin') {
+      reply = `Clinic ke theek samne two-wheelers ke liye dedicated parking available hai. Four-wheelers aur cars ke liye 7th Cross par street parking available hai.`;
+    } else if (dialect === 'kn') {
+      reply = `ಕ್ಲಿನಿಕ್ ಮುಂಭಾಗದಲ್ಲಿ ದ್ವಿಚಕ್ರ ವಾಹನಗಳಿಗೆ (two-wheelers) ಪಾರ್ಕಿಂಗ್ ಲಭ್ಯವಿದೆ. ಕಾರುಗಳಿಗೆ 7th Cross ರಸ್ತೆಯ ಬದಿಯಲ್ಲಿ ಪಾರ್ಕಿಂಗ್ ಲಭ್ಯವಿದೆ.`;
+    } else if (dialect === 'kn_latin') {
+      reply = `Clinic munde two-wheelers ge dedicated parking ide. Four-wheelers mathu cars ge 7th Cross nalli street parking ide.`;
+    } else {
+      reply =
+        kbData.faqs.find((f: any) => f.id === 'faq_parking')?.answer ||
+        'Dedicated two-wheeler parking is available directly in front of the clinic. For four-wheelers and cars, street parking is available along 7th Cross.';
+    }
+    return { matched: true, reply, kbRef: 'faq_parking' };
+  }
+
+  // 4. Consultation Fees (Standard inquiry)
+  const isFees =
+    /\b(consultation fee|consultation charges|fee structure|fees kitni|kitna charge|shulka eshtu)\b/i.test(clean);
+
+  if (isFees) {
+    let reply = '';
+    if (dialect === 'hi') {
+      reply = `जनरल फिजिशियन परामर्श ₹500 है, बाल रोग विशेषज्ञ (Paediatric) परामर्श ₹600 है, बेसिक स्वास्थ्य जांच ₹350 और टीकाकरण ₹250 है।`;
+    } else if (dialect === 'hi_latin') {
+      reply = `General Physician consultation ₹500 hai, Paediatric consultation ₹600, Basic Health checkup ₹350, aur Vaccination administration ₹250 hai.`;
+    } else if (dialect === 'kn') {
+      reply = `ಜನರಲ್ ಫಿಜಿಶಿಯನ್ ಸಮಾಲೋಚನೆ ಶುಲ್ಕ ₹500, ಮಕ್ಕಳ ತಜ್ಞರ (Paediatric) ಸಮಾಲೋಚನೆ ಶುಲ್ಕ ₹600, ಆರೋಗ್ಯ ತಪಾಸಣೆ ₹350 ಮತ್ತು ಲಸಿಕೆ ₹250.`;
+    } else if (dialect === 'kn_latin') {
+      reply = `General Physician consultation ₹500, Paediatric consultation ₹600, Basic Health checkup ₹350, mathu Vaccination administration ₹250 ide.`;
+    } else {
+      reply =
+        kbData.faqs.find((f: any) => f.id === 'faq_fees')?.answer ||
+        'General Physician consultation is ₹500, Paediatric consultation is ₹600, Health checkup screening is ₹350, and Vaccination administration is ₹250.';
+    }
+    return { matched: true, reply, kbRef: 'faq_fees' };
+  }
+
+  // 5. Payment Methods (UPI, Cards, Cash)
+  const isPayment =
+    /\b(payment methods|payment options|modes of payment|accept upi|accept gpay|accept cards|credit card|pay cash|payment kaise)\b/i.test(clean);
+
+  if (isPayment) {
+    let reply = '';
+    if (dialect === 'hi') {
+      reply = `हम सभी परामर्शों और क्लिनिक सेवाओं के लिए नकद (Cash), UPI (Google Pay, PhonePe, Paytm) और सभी प्रमुख डेबिट/क्रेडिट कार्ड स्वीकार करते हैं।`;
+    } else if (dialect === 'hi_latin') {
+      reply = `Hum consultations aur clinic services ke liye Cash, UPI (Google Pay, PhonePe, Paytm), aur sabhi major Debit/Credit Cards accept karte hain.`;
+    } else if (dialect === 'kn') {
+      reply = `ನಾವು ನಗದು (Cash), UPI (Google Pay, PhonePe, Paytm) ಮತ್ತು ಎಲ್ಲಾ ಪ್ರಮುಖ ಡೆಬಿಟ್/ಕ್ರೆಡಿಟ್ ಕಾರ್ಡ್‌ಗಳನ್ನು ಸ್ವೀಕರಿಸುತ್ತೇವೆ.`;
+    } else if (dialect === 'kn_latin') {
+      reply = `Naavu Cash, UPI (Google Pay, PhonePe, Paytm), mathu ella major Debit/Credit Cards accept maduththeve.`;
+    } else {
+      reply = `We accept Cash, UPI (Google Pay, PhonePe, Paytm), and all major Debit/Credit Cards for consultations and services at the clinic.`;
+    }
+    return { matched: true, reply, kbRef: 'faq_payment' };
+  }
+
+  return null;
 }
 
 export async function processMessage(params: {
@@ -333,13 +488,14 @@ export async function processMessage(params: {
       const targetBkId = idMatch[1].trim();
       const providedPhone = phoneMatch[1].replace(/\D/g, '').trim();
 
+      const genericMismatchReply = `Unable to verify booking details. Please ensure you provide the exact Booking ID and the 10-digit phone number used when booking (e.g. "Cancel BK_12345 9876543210"). For security, cancellations can only be processed when both credentials match our records. Alternatively, please call our front desk directly at ${kbData.facts.phone || '+91 80 2525 0100'}.`;
+
       const booking = await db.getBooking(targetBkId);
       if (!booking) {
-        const notFoundReply = `No booking was found with ID "${targetBkId}". Please check your booking confirmation or call our desk at ${kbData.facts.phone || '+91 98765 43210'}.`;
         await db.createMessage({
           conversation_id: convId,
           sender: 'bot',
-          text: notFoundReply,
+          text: genericMismatchReply,
           language: langDetection.language,
           intent: 'booking_change_or_cancel',
           decision: 'act',
@@ -347,7 +503,7 @@ export async function processMessage(params: {
         });
         return {
           conversationId: convId,
-          text: notFoundReply,
+          text: genericMismatchReply,
           decision: 'act',
           intent: 'booking_change_or_cancel',
           provider: 'deterministic_booking_engine',
@@ -361,12 +517,11 @@ export async function processMessage(params: {
       const providedPhoneClean = providedPhone.replace(/\D/g, '').slice(-10);
 
       if (!customerContactClean || customerContactClean !== providedPhoneClean) {
-        // Ownership verification failed
-        const securityFailReply = `Security verification failed: The phone number provided does not match the contact on file for booking ${targetBkId}. For security, we cannot cancel or modify another patient's appointment over chat. Please call City Health Clinic directly at ${kbData.facts.phone || '+91 98765 43210'}.`;
+        // Ownership verification failed - return same generic message to avoid disclosing ID existence
         await db.createMessage({
           conversation_id: convId,
           sender: 'bot',
-          text: securityFailReply,
+          text: genericMismatchReply,
           language: langDetection.language,
           intent: 'booking_change_or_cancel',
           decision: 'act',
@@ -374,7 +529,7 @@ export async function processMessage(params: {
         });
         return {
           conversationId: convId,
-          text: securityFailReply,
+          text: genericMismatchReply,
           decision: 'act',
           intent: 'booking_change_or_cancel',
           provider: 'deterministic_booking_engine',
@@ -479,13 +634,14 @@ export async function processMessage(params: {
       });
       const nearestSlots = avail.slots.slice(0, 3).map((s) => s.time).join(', ');
       
+      const formattedTargetDate = formatHumanDate(targetDate, dialect);
       let breakReply = '';
       if (langDetection.language === 'hi') {
-        breakReply = `City Health Clinic ${requestedTime.display} baje band rehta hai (OPD break: 1:00 PM - 4:00 PM; OPD timings: 9:00 AM-1:00 PM aur 4:00 PM-8:00 PM). ${targetDate} ke liye nearest available evening slots yeh hain: ${nearestSlots}. Kya aap inme se koi slot book karna chahte hain?`;
+        breakReply = `City Health Clinic ${requestedTime.display} baje band rehta hai (OPD break: 1:00 PM - 4:00 PM; OPD timings: 9:00 AM-1:00 PM aur 4:00 PM-8:00 PM). ${formattedTargetDate} ke liye nearest available evening slots yeh hain: ${nearestSlots}. Kya aap inme se koi slot book karna chahte hain?`;
       } else if (langDetection.language === 'kn') {
-        breakReply = `City Health Clinic ${requestedTime.display} ಗಂಟೆಗೆ ಮುಚ್ಚಿರುತ್ತದೆ (OPD ವಿರಾಮ: 1:00 PM - 4:00 PM; OPD ಸಮಯ: 9:00 AM-1:00 PM ಮತ್ತು 4:00 PM-8:00 PM). ${targetDate} ಗೆ ಲಭ್ಯವಿರುವ ಹತ್ತಿರದ ಸಂಜೆ ಸ್ಲಾಟ್‌ಗಳು: ${nearestSlots}. ಇವುಗಳಲ್ಲಿ ಒಂದನ್ನು ದೃಢೀಕರಿಸಲು ಬಯಸುವಿರಾ?`;
+        breakReply = `City Health Clinic ${requestedTime.display} ಗಂಟೆಗೆ ಮುಚ್ಚಿರುತ್ತದೆ (OPD ವಿರಾಮ: 1:00 PM - 4:00 PM; OPD ಸಮಯ: 9:00 AM-1:00 PM ಮತ್ತು 4:00 PM-8:00 PM). ${formattedTargetDate} ಗೆ ಲಭ್ಯವಿರುವ ಹತ್ತಿರದ ಸಂಜೆ ಸ್ಲಾಟ್‌ಗಳು: ${nearestSlots}. ಇವುಗಳಲ್ಲಿ ಒಂದನ್ನು ದೃಢೀಕರಿಸಲು ಬಯಸುವಿರಾ?`;
       } else {
-        breakReply = `City Health Clinic is closed at ${requestedTime.display} (our OPD break is 1:00 PM to 4:00 PM; regular OPD hours are Mon–Sat 9:00 AM–1:00 PM and 4:00 PM–8:00 PM). The nearest available slots on ${targetDate} are: ${nearestSlots}. Would you like to confirm one of these?`;
+        breakReply = `City Health Clinic is closed at ${requestedTime.display} (our OPD break is 1:00 PM to 4:00 PM; regular OPD hours are Mon–Sat 9:00 AM–1:00 PM and 4:00 PM–8:00 PM). The nearest available slots on ${formattedTargetDate} are: ${nearestSlots}. Would you like to confirm one of these?`;
       }
 
       await db.createMessage({
@@ -520,13 +676,14 @@ export async function processMessage(params: {
       });
       const nearestSlots = avail.slots.slice(0, 3).map((s) => s.time).join(', ');
       
+      const formattedTargetDate = formatHumanDate(targetDate, dialect);
       let earlyReply = '';
       if (langDetection.language === 'hi') {
-        earlyReply = `City Health Clinic ${requestedTime.display} baje band rehta hai (morning OPD 9:00 AM baje shuru hota hai). ${targetDate} ke liye nearest available slots yeh hain: ${nearestSlots}. Kya aap inme se koi book karna chahte hain?`;
+        earlyReply = `City Health Clinic ${requestedTime.display} baje band rehta hai (morning OPD 9:00 AM baje shuru hota hai). ${formattedTargetDate} ke liye nearest available slots yeh hain: ${nearestSlots}. Kya aap inme se koi book karna chahte hain?`;
       } else if (langDetection.language === 'kn') {
-        earlyReply = `City Health Clinic ${requestedTime.display} ಗಂಟೆಗೆ ಮುಚ್ಚಿರುತ್ತದೆ (ಬೆಳಿಗ್ಗೆ OPD 9:00 AM ಕ್ಕೆ ಪ್ರಾರಂಭವಾಗುತ್ತದೆ). ${targetDate} ಗೆ ಲಭ್ಯವಿರುವ ಹತ್ತಿರದ ಸ್ಲಾಟ್‌ಗಳು: ${nearestSlots}. ಇವುಗಳಲ್ಲಿ ಒಂದನ್ನು ದೃಢೀಕರಿಸಲು ಬಯಸುವಿರಾ?`;
+        earlyReply = `City Health Clinic ${requestedTime.display} ಗಂಟೆಗೆ ಮುಚ್ಚಿರುತ್ತದೆ (ಬೆಳಿಗ್ಗೆ OPD 9:00 AM ಕ್ಕೆ ಪ್ರಾರಂಭವಾಗುತ್ತದೆ). ${formattedTargetDate} ಗೆ ಲಭ್ಯವಿರುವ ಹತ್ತಿರದ ಸ್ಲಾಟ್‌ಗಳು: ${nearestSlots}. ಇವುಗಳಲ್ಲಿ ಒಂದನ್ನು ದೃಢೀಕರಿಸಲು ಬಯಸುವಿರಾ?`;
       } else {
-        earlyReply = `City Health Clinic is closed at ${requestedTime.display} (morning OPD opens at 9:00 AM). The nearest available morning slots on ${targetDate} are: ${nearestSlots}. Would you like to confirm one of these?`;
+        earlyReply = `City Health Clinic is closed at ${requestedTime.display} (morning OPD opens at 9:00 AM). The nearest available morning slots on ${formattedTargetDate} are: ${nearestSlots}. Would you like to confirm one of these?`;
       }
 
       await db.createMessage({
@@ -716,7 +873,7 @@ export async function processMessage(params: {
         timeWindow: 'any',
       });
       const altTimesStr = avail.slots.map((s) => s.time).join(', ');
-      const occupiedReply = `Sorry, that ${chosenTime} slot was just taken by another patient! Here are the next available slots for ${matchedService.name} on ${bookingDate}: ${altTimesStr || 'No further slots available today'}. Would you like to select one of these?`;
+      const occupiedReply = `Sorry, that ${chosenTime} slot was just taken by another patient! Here are the next available slots for ${matchedService.name} on ${formatHumanDate(bookingDate, dialect)}: ${altTimesStr || 'No further slots available today'}. Would you like to select one of these?`;
 
       await db.createMessage({
         conversation_id: convId,
@@ -767,6 +924,32 @@ export async function processMessage(params: {
       intent: 'booking_create',
       provider: 'deterministic_booking_engine',
       quickReplies: ['Location & Directions', 'Clinic Hours', 'Emergency Contact'],
+    };
+  }
+
+  // 7.8 High-Confidence Direct Knowledge Base FAQ Router (Item 3)
+  // Reduces cloud LLM load on standard questions (timings, location, parking, fees, payment)
+  const highConfFaq = matchHighConfidenceFaq(userText, kbData, dialect);
+  if (highConfFaq) {
+    await db.createMessage({
+      conversation_id: convId,
+      sender: 'bot',
+      text: highConfFaq.reply,
+      language: langDetection.language,
+      intent: 'faq',
+      decision: 'answer',
+      confidence: 0.98,
+      kb_refs: [highConfFaq.kbRef],
+      provider: 'kb_direct',
+    });
+
+    return {
+      conversationId: convId,
+      text: highConfFaq.reply,
+      decision: 'answer',
+      intent: 'faq',
+      provider: 'kb_direct',
+      quickReplies: ['Book Appointment', 'Clinic Hours', 'Location'],
     };
   }
 
@@ -918,6 +1101,7 @@ Never Answer Rules: ${JSON.stringify(kbData.neverAnswer)}`;
     decision: shouldEscalate ? 'escalate' : llmResult.decision,
     intent: llmResult.intent,
     provider: llmResult.provider,
+    failedOver: llmResult.failedOver,
     quickReplies: shouldEscalate
       ? ['Talk to Staff', 'Emergency Contact', 'Clinic Timings']
       : ['Book Appointment', 'Clinic Hours', 'Location & Parking'],
