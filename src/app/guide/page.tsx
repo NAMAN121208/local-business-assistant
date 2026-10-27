@@ -90,10 +90,10 @@ export default function GuidePage() {
               <strong>4. Wispr Flow Voice Loop:</strong> Business owners speak into text fields to generate knowledge bases and correct bot mistakes in seconds.
             </p>
             <p>
-              <strong>5. Production Ready:</strong> Built with Next.js App Router, dual LLM failover (Gemini + Grok), and zero-leak auth.
+              <strong>5. Production Ready:</strong> Built with Next.js App Router, dual LLM failover (Google Gemini + Groq LPU), and zero-leak auth.
             </p>
             <p className="pt-2 border-t border-teal-100 text-teal-800 text-xs leading-relaxed">
-              <strong>6. Privacy &amp; Third-Party LLM Processing:</strong> Inquiries submitted to the customer chat are processed in real-time by third-party LLM providers (Google Gemini with failover to Groq / xAI) solely to classify user intent and formulate accurate responses from the verified clinic knowledge base. Please do not submit real personal or medical records. Customer conversations can be purged at any time via owner maintenance scripts.
+              <strong>6. Privacy &amp; Third-Party LLM Processing:</strong> Inquiries submitted to the customer chat are processed in real-time by third-party LLM providers (Google Gemini with failover to Groq) solely to classify user intent and formulate accurate responses from the verified clinic knowledge base. Please do not submit real personal or medical records. Customer conversations can be purged at any time via owner maintenance scripts.
             </p>
           </div>
         </div>

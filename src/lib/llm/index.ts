@@ -1,6 +1,6 @@
 // src/lib/llm/index.ts
 import { GeminiProvider } from './gemini';
-import { GrokProvider } from './grok';
+import { GroqProvider } from './grok';
 import { LLMMessage, LLMOutput, LLMProvider, LLMRequest, LLMResult, ToolDefinition } from './types';
 
 export * from './types';
@@ -12,12 +12,12 @@ interface CircuitState {
   disabledUntil: number;
 }
 
-const circuitStates: Record<'gemini' | 'grok', CircuitState> = {
+const circuitStates: Record<'gemini' | 'groq', CircuitState> = {
   gemini: { consecutiveFailures: 0, disabledUntil: 0 },
-  grok: { consecutiveFailures: 0, disabledUntil: 0 },
+  groq: { consecutiveFailures: 0, disabledUntil: 0 },
 };
 
-function isProviderAvailable(providerName: 'gemini' | 'grok'): boolean {
+function isProviderAvailable(providerName: 'gemini' | 'groq'): boolean {
   const state = circuitStates[providerName];
   if (state.disabledUntil > Date.now()) {
     console.warn(`[LLM CircuitBreaker] Provider ${providerName} is temporarily tripped until ${new Date(state.disabledUntil).toISOString()}`);
@@ -26,18 +26,24 @@ function isProviderAvailable(providerName: 'gemini' | 'grok'): boolean {
   return true;
 }
 
-function recordSuccess(providerName: 'gemini' | 'grok') {
-  const state = circuitStates[providerName];
-  state.consecutiveFailures = 0;
-  state.disabledUntil = 0;
+function recordSuccess(providerName: string) {
+  const key = providerName === 'grok' ? 'groq' : (providerName as 'gemini' | 'groq');
+  const state = circuitStates[key];
+  if (state) {
+    state.consecutiveFailures = 0;
+    state.disabledUntil = 0;
+  }
 }
 
-function recordFailure(providerName: 'gemini' | 'grok') {
-  const state = circuitStates[providerName];
-  state.consecutiveFailures += 1;
-  if (state.consecutiveFailures >= 3) {
-    state.disabledUntil = Date.now() + 60000; // 60 seconds
-    console.warn(`[LLM CircuitBreaker] Tripped 3 failures for ${providerName}. Disabled for 60s.`);
+function recordFailure(providerName: string) {
+  const key = providerName === 'grok' ? 'groq' : (providerName as 'gemini' | 'groq');
+  const state = circuitStates[key];
+  if (state) {
+    state.consecutiveFailures += 1;
+    if (state.consecutiveFailures >= 3) {
+      state.disabledUntil = Date.now() + 60000; // 60 seconds
+      console.warn(`[LLM CircuitBreaker] Tripped 3 failures for ${key}. Disabled for 60s.`);
+    }
   }
 }
 
@@ -67,7 +73,7 @@ async function callProviderWithRetry(provider: LLMProvider, request: LLMRequest)
 /**
  * Main LLM invocation function
  * Takes systemPrompt, messages, tool definitions and handles:
- * - Primary vs Backup provider
+ * - Primary (Gemini) vs Backup (Groq) provider
  * - Retry once with backoff on 429/5xx/timeout/schema failure
  * - Automatic failover to secondary provider
  * - Circuit breaker (3 failures -> skip 60s)
@@ -79,15 +85,16 @@ export async function callLLM(params: {
   tools?: ToolDefinition[];
   temperature?: number;
 }): Promise<LLMResult> {
-  const primaryName = (process.env.PRIMARY_PROVIDER || 'gemini').toLowerCase() === 'grok' ? 'grok' : 'gemini';
-  const secondaryName = primaryName === 'gemini' ? 'grok' : 'gemini';
+  const rawPrimary = (process.env.PRIMARY_PROVIDER || 'gemini').toLowerCase();
+  const primaryName: 'gemini' | 'groq' = (rawPrimary === 'groq' || rawPrimary === 'grok') ? 'groq' : 'gemini';
+  const secondaryName: 'gemini' | 'groq' = primaryName === 'gemini' ? 'groq' : 'gemini';
 
-  const providers: Record<'gemini' | 'grok', LLMProvider> = {
+  const providers: Record<'gemini' | 'groq', LLMProvider> = {
     gemini: new GeminiProvider(),
-    grok: new GrokProvider(),
+    groq: new GroqProvider(),
   };
 
-  const order: Array<'gemini' | 'grok'> = [primaryName, secondaryName];
+  const order: Array<'gemini' | 'groq'> = [primaryName, secondaryName];
 
   for (const name of order) {
     if (!isProviderAvailable(name)) {
@@ -114,7 +121,7 @@ export async function callLLM(params: {
     reply_text:
       'Thank you for reaching out to City Health Clinic. Our automated assistant is currently experiencing high load. A staff member has been alerted and will assist you shortly.',
     language: 'en',
-    confidence: 0.1,
+    confidence: 1.0,
     kb_refs: [],
     tool_calls: [],
     provider: 'fallback',

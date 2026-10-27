@@ -131,27 +131,20 @@ async function testGemini(): Promise<boolean> {
   }
 }
 
-async function testGrok(): Promise<boolean> {
-  const apiKey = process.env.GROQ_API_KEY || process.env.XAI_API_KEY;
-  const isGroq = apiKey?.startsWith('gsk_') || Boolean(process.env.GROQ_API_KEY);
-  const providerLabel = isGroq ? 'Groq (LPU Inference)' : 'Grok (xAI)';
-  console.log(`\n--- 2. Testing Backup Provider (${providerLabel}) & Models Discovery ---`);
-  if (!apiKey || apiKey === 'your_xai_grok_api_key_here' || apiKey === 'your_groq_api_key_here') {
-    console.log('⚠️ GROQ_API_KEY or XAI_API_KEY is not set in environment or .env.local.');
+async function testGroq(): Promise<boolean> {
+  const apiKey = process.env.GROQ_API_KEY;
+  console.log('\n--- 2. Testing Backup Provider (Groq LPU Inference) & Models Discovery ---');
+  if (!apiKey || apiKey === 'your_groq_api_key_here') {
+    console.log('⚠️ GROQ_API_KEY is not set in environment or .env.local.');
     console.log('  To test live backup calls, add GROQ_API_KEY=<your-key> to .env.local');
     return false;
   }
 
-  const model = isGroq
-    ? process.env.GROQ_MODEL || 'qwen/qwen3.8-27b'
-    : process.env.XAI_MODEL || 'grok-2-latest';
-
-  const modelsUrl = isGroq
-    ? 'https://api.groq.com/openai/v1/models'
-    : 'https://api.x.ai/v1/models';
+  const model = process.env.GROQ_MODEL || 'qwen/qwen3.8-27b';
+  const modelsUrl = 'https://api.groq.com/openai/v1/models';
 
   // Step 1: Call models endpoint
-  console.log(`  [Models Endpoint]: Querying ${providerLabel} models endpoint...`);
+  console.log('  [Models Endpoint]: Querying Groq models endpoint...');
   try {
     const listRes = await fetch(modelsUrl, {
       method: 'GET',
@@ -159,7 +152,7 @@ async function testGrok(): Promise<boolean> {
     });
     if (!listRes.ok) {
       const err = await listRes.text();
-      console.error(`❌ Failed to query ${providerLabel} models endpoint (${listRes.status}): ${err}`);
+      console.error(`❌ Failed to query Groq models endpoint (${listRes.status}): ${err}`);
       return false;
     }
     const listData = await listRes.json();
@@ -169,25 +162,22 @@ async function testGrok(): Promise<boolean> {
     const modelExists = availableModels.some((m: string) => m === model);
     if (!modelExists) {
       console.error(
-        `❌ ERROR: Configured model "${model}" was NOT found in your ${providerLabel} account!`
+        `❌ ERROR: Configured model "${model}" was NOT found in your Groq account!`
       );
       console.error(
-        `   Please change model in .env.local to one of: ${availableModels.join(', ')}`
+        `   Please change GROQ_MODEL in .env.local to one of: ${availableModels.join(', ')}`
       );
       return false;
     }
-    console.log(`  [Model Verified]: "${model}" exists and is accessible in your ${providerLabel} account.`);
+    console.log(`  [Model Verified]: "${model}" exists and is accessible in your Groq account.`);
   } catch (err: any) {
-    console.error(`❌ Network error contacting ${providerLabel} models list:`, err.message);
+    console.error('❌ Network error contacting Groq models list:', err.message);
     return false;
   }
 
   // Step 2: Execute live generation call
-  const url = isGroq
-    ? 'https://api.groq.com/openai/v1/chat/completions'
-    : 'https://api.x.ai/v1/chat/completions';
+  const url = 'https://api.groq.com/openai/v1/chat/completions';
   const start = Date.now();
-
   try {
     const res = await fetch(url, {
       method: 'POST',
@@ -208,18 +198,18 @@ async function testGrok(): Promise<boolean> {
 
     const duration = Date.now() - start;
     if (!res.ok) {
-      const errText = await res.text();
-      console.error(`❌ ${providerLabel} API call rejected (${res.status}) [Latency: ${duration}ms]: ${errText}`);
+      const err = await res.text();
+      console.error(`❌ Groq call failed (${res.status}) [Latency: ${duration}ms]: ${err}`);
       return false;
     }
 
     const data = await res.json();
     const content = data.choices?.[0]?.message?.content;
-    console.log(`✅ [Provider: ${isGroq ? 'groq' : 'grok'}] [Model: ${model}] [Latency: ${duration}ms] Response verified!`);
+    console.log(`✅ [Provider: groq] [Model: ${model}] [Latency: ${duration}ms] Response verified!`);
     console.log(`   Sample Reply: ${content?.slice(0, 120)}...`);
     return true;
   } catch (err: any) {
-    console.error(`❌ ${providerLabel} network exception [Latency: ${Date.now() - start}ms]:`, err.message);
+    console.error(`❌ Groq network exception [Latency: ${Date.now() - start}ms]:`, err.message);
     return false;
   }
 }
@@ -280,8 +270,8 @@ async function run() {
   console.log('====================================================');
 
   const geminiOk = await testGemini();
-  const grokOk = await testGrok();
-  const hasLiveLLM = geminiOk || grokOk;
+  const groqOk = await testGroq();
+  const hasLiveLLM = geminiOk || groqOk;
 
   await testRealLLMQueries(hasLiveLLM);
 
@@ -290,7 +280,7 @@ async function run() {
     console.log('✅ Real LLM provider call test finished with ACTIVE API keys!');
   } else {
     console.log('ℹ️ LLM test finished. No external API keys were provided in this environment.');
-    console.log('   Set GEMINI_API_KEY and/or XAI_API_KEY in .env.local to test live cloud endpoints.');
+    console.log('   Set GEMINI_API_KEY and/or GROQ_API_KEY in .env.local to test live cloud endpoints.');
   }
   console.log('====================================================\n');
 }

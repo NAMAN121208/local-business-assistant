@@ -11,12 +11,10 @@ export async function GET() {
     process.env.GEMINI_API_KEY !== 'your_gemini_api_key_here'
   );
 
-  const backupKey = process.env.GROQ_API_KEY || process.env.XAI_API_KEY;
-  const isGroqBackup = backupKey?.startsWith('gsk_') || Boolean(process.env.GROQ_API_KEY);
+  const groqKey = process.env.GROQ_API_KEY;
   const backupConfigured = Boolean(
-    backupKey &&
-    backupKey !== 'your_xai_grok_api_key_here' &&
-    backupKey !== 'your_groq_api_key_here'
+    groqKey &&
+    groqKey !== 'your_groq_api_key_here'
   );
 
   const supabaseConfigured = Boolean(
@@ -37,7 +35,7 @@ export async function GET() {
       const supabaseKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY)!;
       const client = createClient(supabaseUrl, supabaseKey);
 
-      const queryPromise = client.from('Business').select('id').limit(1);
+      const queryPromise = client.from('businesses').select('id').limit(1);
       const timeoutPromise = new Promise((_, reject) =>
         setTimeout(() => reject(new Error('Supabase ping timed out (2000ms)')), 2000)
       );
@@ -77,10 +75,8 @@ export async function GET() {
       geminiConfigured,
       geminiModel: process.env.GEMINI_MODEL || 'gemini-flash-lite-latest',
       backupConfigured,
-      backupProvider: isGroqBackup ? 'groq' : 'grok',
-      backupModel: isGroqBackup
-        ? process.env.GROQ_MODEL || 'qwen/qwen3.8-27b'
-        : process.env.XAI_MODEL || 'grok-2-latest',
+      backupProvider: 'groq',
+      backupModel: process.env.GROQ_MODEL || 'qwen/qwen3.8-27b',
       circuitBreakerEnabled: true,
       failoverEnabled: true,
     },
