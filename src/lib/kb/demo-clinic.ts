@@ -78,7 +78,10 @@ export const demoClinicKBContent: KnowledgeBaseContent = {
       answer:
         'The clinic is open Monday to Saturday from 09:00 AM to 01:00 PM (Morning OPD) and 04:00 PM to 08:00 PM (Evening OPD). Sunday is closed for routine appointments.',
       category: 'timings',
-      keywords: ['hours', 'timings', 'time', 'open', 'close', 'sunday', 'morning', 'evening'],
+      keywords: [
+        'hours', 'timings', 'time', 'open', 'close', 'sunday', 'morning', 'evening',
+        'samaya', 'khula', 'bandh', 'kab', 'समय', 'ಖುಲ್ಲಾ', 'ಸಮಯ'
+      ],
     },
     {
       id: 'faq_location',
@@ -86,7 +89,10 @@ export const demoClinicKBContent: KnowledgeBaseContent = {
       answer:
         'We are at 42 1st Main, 7th Cross, Indiranagar, Bengaluru 560038, opposite the BDA Complex and 200m from Indiranagar Metro Station.',
       category: 'location',
-      keywords: ['location', 'address', 'where', 'directions', 'reach', 'landmark', 'metro'],
+      keywords: [
+        'location', 'address', 'where', 'directions', 'reach', 'landmark', 'metro',
+        'kahan', 'elli', 'indiranagar', 'bda', 'कहाँ', 'कहां', 'ಎಲ್ಲಿ', 'ಸ್ಥಳ'
+      ],
     },
     {
       id: 'faq_doctors',
@@ -94,7 +100,10 @@ export const demoClinicKBContent: KnowledgeBaseContent = {
       answer:
         'Dr. Sneha Rao (General Physician) and Dr. Arvind Kumar (Paediatrician) are available Monday through Saturday during OPD hours.',
       category: 'doctors',
-      keywords: ['doctor', 'physician', 'paediatrician', 'specialist', 'dr sneha', 'dr arvind'],
+      keywords: [
+        'doctor', 'physician', 'paediatrician', 'specialist', 'dr sneha', 'dr arvind',
+        'kaun', 'dr', 'doctors', 'डॉक्टर', 'ವೈದ್ಯರು'
+      ],
     },
     {
       id: 'faq_fees',
@@ -102,7 +111,10 @@ export const demoClinicKBContent: KnowledgeBaseContent = {
       answer:
         'General Physician consultation is ₹500, Paediatric consultation is ₹600, Health checkup screening is ₹350, and Vaccination administration is ₹250.',
       category: 'fees',
-      keywords: ['fee', 'fees', 'charges', 'cost', 'price', 'rate'],
+      keywords: [
+        'fee', 'fees', 'charges', 'cost', 'price', 'rate', 'rupaye', 'kitna', 'kharcha',
+        'ಶುಲ್ಕ', 'ಖರ್ಚು', 'फीस', 'रुपये', 'खर्च'
+      ],
     },
     {
       id: 'faq_booking',

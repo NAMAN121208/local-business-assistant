@@ -82,26 +82,60 @@ export function parseRelativeDate(text: string, timezone: string = 'Asia/Kolkata
 
   const baseDate = new Date(Date.UTC(now.year, now.month - 1, now.day));
 
-  if (lower.includes('day after tomorrow')) {
+  // Day after tomorrow: English, Hindi (Hinglish/Devanagari), Kannada (Kanglish/Kannada script)
+  if (
+    lower.includes('day after tomorrow') ||
+    lower.includes('parso') ||
+    lower.includes('parson') ||
+    lower.includes('परसों') ||
+    lower.includes('naadadhu') ||
+    lower.includes('nadadhu') ||
+    lower.includes('ನಾಡದ್ದು')
+  ) {
     baseDate.setUTCDate(baseDate.getUTCDate() + 2);
     return baseDate.toISOString().split('T')[0];
   }
 
-  if (lower.includes('tomorrow') || lower.includes('kal')) {
+  // Tomorrow: English, Hindi, Kannada
+  if (
+    lower.includes('tomorrow') ||
+    lower.includes('kal') ||
+    lower.includes('कल') ||
+    lower.includes('naale') ||
+    lower.includes('nale') ||
+    lower.includes('ನಾಳೆ')
+  ) {
     baseDate.setUTCDate(baseDate.getUTCDate() + 1);
     return baseDate.toISOString().split('T')[0];
   }
 
-  if (lower.includes('today') || lower.includes('aaj')) {
+  // Today: English, Hindi, Kannada
+  if (
+    lower.includes('today') ||
+    lower.includes('aaj') ||
+    lower.includes('आज') ||
+    lower.includes('ivattu') ||
+    lower.includes('eevattu') ||
+    lower.includes('ಇವತ್ತು')
+  ) {
     return now.dateStr;
   }
 
-  // Weekdays: monday, tuesday, wednesday, etc.
-  const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-  for (let i = 0; i < days.length; i++) {
-    if (lower.includes(days[i])) {
-      let diff = i - now.dayOfWeek;
-      if (diff <= 0) diff += 7; // next upcoming day
+  // Multilingual Weekday mapping
+  const weekdayGroups = [
+    { idx: 0, terms: ['sunday', 'itwar', 'itwaar', 'ravivar', 'ravivaar', 'रविवार', 'bhanuvara', 'ಭಾನುವಾರ'] },
+    { idx: 1, terms: ['monday', 'somwar', 'somvaar', 'सोमवार', 'somavara', 'ಸೋಮವಾರ'] },
+    { idx: 2, terms: ['tuesday', 'mangalwar', 'mangalvaar', 'मंगलवार', 'mangalavara', 'ಮಂಗಳವಾರ'] },
+    { idx: 3, terms: ['wednesday', 'budhwar', 'budhvaar', 'बुधवार', 'budhavara', 'ಬುಧವಾರ'] },
+    { idx: 4, terms: ['thursday', 'guruwar', 'guruvaar', 'brihaspatiwar', 'गुरुवार', 'guruvara', 'ಗುರುವಾರ'] },
+    { idx: 5, terms: ['friday', 'shukrawar', 'shukravaar', 'शुक्रवार', 'shukravara', 'ಶುಕ್ರವಾರ'] },
+    { idx: 6, terms: ['saturday', 'shaniwar', 'shanivaar', 'शनिवार', 'shanivara', 'ಶನಿವಾರ'] },
+  ];
+
+  for (const group of weekdayGroups) {
+    if (group.terms.some((term) => lower.includes(term))) {
+      let diff = group.idx - now.dayOfWeek;
+      if (diff <= 0) diff += 7; // next upcoming occurrence
       baseDate.setUTCDate(baseDate.getUTCDate() + diff);
       return baseDate.toISOString().split('T')[0];
     }
@@ -109,6 +143,33 @@ export function parseRelativeDate(text: string, timezone: string = 'Asia/Kolkata
 
   return null;
 }
+
+/**
+ * Deterministically parses desired time window across English, Hindi, Hinglish, Kannada & Kanglish
+ */
+export function parseTimeWindow(text: string): 'morning' | 'evening' | 'any' {
+  const lower = text.toLowerCase();
+
+  const morningTerms = [
+    'morning', 'subah', 'subha', 'सुबह', 'beligge', 'belage', 'ಬೆಳಿಗ್ಗೆ',
+    '9am', '10am', '11am', '12pm'
+  ];
+  if (morningTerms.some((t) => lower.includes(t))) {
+    return 'morning';
+  }
+
+  const eveningTerms = [
+    'evening', 'shaam', 'sham', 'dopahar', 'raat', 'शाम', 'दोपहर', 'रात',
+    'sanje', 'sanjege', 'madhyahna', 'raatri', 'ಸಂಜೆ', 'ಮಧ್ಯಾಹ್ನ', 'ರಾತ್ರಿ',
+    '4pm', '5pm', '6pm', '7pm', '8pm'
+  ];
+  if (eveningTerms.some((t) => lower.includes(t))) {
+    return 'evening';
+  }
+
+  return 'any';
+}
+
 
 /**
  * Checks available 30-min booking slots deterministically in code

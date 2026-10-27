@@ -2,9 +2,17 @@
 import { db } from './db';
 import { Conversation, Customer, Message } from './db/types';
 import { callLLM, LLMMessage, LLMResult } from './llm';
-import { isNeverAnswerTopic, retrieveRelevantKnowledge } from './kb';
-import { checkAvailability, confirmBooking, getClinicNow, parseRelativeDate } from './booking';
+import { classifySafetyWithLLM, isNeverAnswerTopic, retrieveRelevantKnowledge } from './kb';
+import {
+  checkAvailability,
+  confirmBooking,
+  getClinicNow,
+  parseRelativeDate,
+  parseTimeWindow,
+} from './booking';
 import { OutgoingMessage } from './channels';
+import { detectLanguage, Dialect } from './locale/detector';
+import { getLocalizedTemplate } from './locale/templates';
 
 export interface ProcessMessageParams {
   businessId: string;
@@ -28,7 +36,11 @@ export async function processMessage(params: {
   const { businessId, channel = 'web', senderName, senderContact } = params;
   const userText = params.text.trim();
 
-  // 1. Identify or create Customer
+  // 1. Detect customer language & script (English, Hindi Devanagari, Kannada script, Hinglish, Kanglish)
+  const langDetection = detectLanguage(userText);
+  const dialect: Dialect = langDetection.dialect;
+
+  // 2. Identify or create Customer
   let customerId = params.customerId;
   if (!customerId) {
     if (senderContact) {
@@ -42,14 +54,19 @@ export async function processMessage(params: {
         business_id: businessId,
         name: senderName || 'Patient',
         contact: senderContact || null,
-        preferred_language: 'en',
+        preferred_language: langDetection.language,
         first_seen_at: new Date().toISOString(),
       });
     }
   }
 
-  // 2. Identify or create Conversation
-  const conversation = await db.getOrCreateConversation(businessId, customerId, channel, params.conversationId);
+  // 3. Identify or create Conversation
+  const conversation = await db.getOrCreateConversation(
+    businessId,
+    customerId,
+    channel,
+    params.conversationId
+  );
   const convId = conversation.id;
 
   // If conversation was previously resolved, reopen it on new customer message
@@ -57,24 +74,25 @@ export async function processMessage(params: {
     await db.updateConversationStatus(convId, 'open');
   }
 
-  // 3. Save incoming customer message
+  // 4. Save incoming customer message
   await db.createMessage({
     conversation_id: convId,
     sender: 'customer',
     text: userText,
-    language: 'en',
+    language: langDetection.language,
   });
 
-  // 4. Check if conversation currently needs human intervention
+  // 5. Check if conversation currently needs human intervention
   // Do not chatter over the owner if a human review is actively pending
   if (conversation.status === 'needs_human') {
-    const holdingMsg =
-      'Thank you. Our clinic staff is already reviewing your thread and will reply shortly. For urgent care, please call +91 98765 99999.';
+    const holdingMsg = getLocalizedTemplate('needs_human_hold', dialect, {
+      emergencyPhone: '+91 98765 99999',
+    });
     await db.createMessage({
       conversation_id: convId,
       sender: 'bot',
       text: holdingMsg,
-      language: 'en',
+      language: langDetection.language,
       provider: 'needs_human_hold',
       decision: 'escalate',
     });
@@ -86,18 +104,36 @@ export async function processMessage(params: {
     };
   }
 
-  // 5. Grounding & Safety pre-check
+  // 6. Grounding & Multilingual Safety Guardrails
   const kbData = await retrieveRelevantKnowledge(businessId, userText);
   const now = getClinicNow('Asia/Kolkata');
+  const emergencyPhone =
+    kbData.facts.emergency_phone || kbData.facts.phone || '+91 98765 99999';
 
-  // Strict guardrail: Never give medical advice, dosages or diagnose
-  if (isNeverAnswerTopic(userText, kbData.neverAnswer)) {
-    const holdingReply =
-      'City Health Clinic does not provide medical prescriptions or clinical diagnosis over chat. For urgent symptoms or emergency care, please contact our 24/7 emergency line at +91 98765 99999 or visit the clinic immediately. If you would like to book a doctor consultation, I can assist you.';
+  // Strict Layer 1: Fast Multilingual Keyword & Regex Guardrails (EN, HI, KN)
+  const isMedicalKeywordMatch = isNeverAnswerTopic(userText, kbData.neverAnswer);
+
+  // Strict Layer 2: LLM Safety Classification (if keyword did not flag, but message could be clinical)
+  let isMedicalLLMMatch = false;
+  let llmSafetyReason = '';
+  if (!isMedicalKeywordMatch) {
+    const safetyCheck = await classifySafetyWithLLM(userText);
+    if (safetyCheck.isMedicalOrSensitive) {
+      isMedicalLLMMatch = true;
+      llmSafetyReason = safetyCheck.reason || 'Flagged by second-layer LLM clinical safety filter';
+    }
+  }
+
+  if (isMedicalKeywordMatch || isMedicalLLMMatch) {
+    const holdingReply = getLocalizedTemplate('medical_holding', dialect, {
+      emergencyPhone,
+    });
 
     await db.createEscalation({
       conversation_id: convId,
-      reason: 'Medical advice or sensitive topic requested (never-answer safety rule)',
+      reason: isMedicalKeywordMatch
+        ? 'Medical advice or prescription requested (Layer 1 multilingual guardrail)'
+        : `Medical safety escalation: ${llmSafetyReason} (Layer 2 LLM safety classifier)`,
       ai_summary: `Customer asked: "${userText.slice(0, 100)}..."`,
       suggested_reply:
         'Please advise patient to consult Dr. Sneha Rao at the clinic or visit emergency room if acute.',
@@ -110,12 +146,14 @@ export async function processMessage(params: {
       conversation_id: convId,
       sender: 'bot',
       text: holdingReply,
-      language: 'en',
+      language: langDetection.language,
       intent: 'sensitive_or_out_of_scope',
       decision: 'escalate',
       confidence: 1.0,
       kb_refs: ['never_answer_medical_advice'],
-      provider: 'deterministic_guardrail',
+      provider: isMedicalKeywordMatch
+        ? 'deterministic_guardrail'
+        : 'llm_safety_classifier',
     });
 
     return {
@@ -123,30 +161,25 @@ export async function processMessage(params: {
       text: holdingReply,
       decision: 'escalate',
       intent: 'sensitive_or_out_of_scope',
-      provider: 'deterministic_guardrail',
+      provider: isMedicalKeywordMatch
+        ? 'deterministic_guardrail'
+        : 'llm_safety_classifier',
       quickReplies: ['Book Doctor Consultation', 'Clinic Hours', 'Emergency Contact'],
     };
   }
 
-  // 6. Deterministic Booking Detection & Slot Filling
+  // 7. Deterministic Multilingual Booking Engine & Slot Filling
   const lower = userText.toLowerCase();
   const history = await db.getRecentMessages(convId, 8);
 
-  // Check if user is asking for availability or booking in English or Hinglish
   const isBookingQuery =
-    /\b(book|appointment|slot|schedule|consultation|doctor|available|timings|milega|milenge|dikhana|dikha)\b/i.test(
+    /\b(book|appointment|slot|schedule|consultation|doctor|available|timings|milega|milenge|dikhana|dikha|chahiye|beku|ideya|sigutha|madalu)\b/i.test(
       userText
     );
   const targetDate = parseRelativeDate(userText, 'Asia/Kolkata');
+  const timeWindow = parseTimeWindow(userText);
 
   if (isBookingQuery && targetDate) {
-    const timeWindow =
-      lower.includes('morning') || lower.includes('subah')
-        ? 'morning'
-        : lower.includes('evening') || lower.includes('shaam')
-        ? 'evening'
-        : 'any';
-
     const avail = await checkAvailability({
       businessId,
       service: 'General Physician Consultation',
@@ -159,14 +192,18 @@ export async function processMessage(params: {
 
     if (avail.available && avail.slots.length > 0) {
       const slotList = avail.slots.map((s) => s.time).join(', ');
-      replyText = `We have slots available for Dr. Consultation on ${avail.date} (${
-        timeWindow === 'any' ? 'OPD hours' : timeWindow
-      }): ${slotList}. Would you like to confirm one of these slots? Please reply with your preferred time and your name.`;
+      replyText = getLocalizedTemplate('booking_slot_options', dialect, {
+        date: avail.date,
+        timeWindow: timeWindow === 'any' ? 'OPD hours' : timeWindow,
+        slots: slotList,
+      });
       quickReplies = avail.slots.map((s) => `Confirm ${s.time} on ${avail.date}`);
     } else {
       replyText =
         avail.reason ||
-        `No available slots found for ${avail.date}. Our regular OPD hours are Mon-Sat 9am-1pm and 4pm-8pm. Would you like to check the next working day?`;
+        getLocalizedTemplate('booking_unavailable', dialect, {
+          date: avail.date,
+        });
       quickReplies = ['Check Tomorrow', 'Clinic Hours', 'Call Clinic'];
     }
 
@@ -174,7 +211,7 @@ export async function processMessage(params: {
       conversation_id: convId,
       sender: 'bot',
       text: replyText,
-      language: 'en',
+      language: langDetection.language,
       intent: 'booking_create',
       decision: 'act',
       confidence: 1.0,
@@ -192,21 +229,24 @@ export async function processMessage(params: {
     };
   }
 
-  // Check if user is confirming a proposed booking
+  // Check if customer is confirming a proposed booking
   const confirmMatch = lower.match(
-    /\b(confirm|yes\b|please book|book this)\b.*?(?:(\d{1,2}:\d{2}\s*(?:am|pm)?)|(\d{1,2}\s*(?:am|pm)))?/i
+    /\b(confirm|yes\b|please book|book this|kardo|ha\b|haan\b|sari\b|hudu)\b.*?(?:(\d{1,2}:\d{2}\s*(?:am|pm)?)|(\d{1,2}\s*(?:am|pm)))?/i
   );
   const hasPendingBookingContext = history.some(
-    (h) => h.sender === 'bot' && h.intent === 'booking_create' && h.text.includes('slots available')
+    (h) => h.sender === 'bot' && h.intent === 'booking_create' && (h.text.includes('slots') || h.text.includes('ಸ್ಲಾಟ್‌ಗಳು') || h.text.includes('स्लॉट'))
   );
 
   if (confirmMatch && hasPendingBookingContext) {
-    const lastBotMsg = [...history].reverse().find((h) => h.sender === 'bot' && h.text.includes('slots available'));
+    const lastBotMsg = [...history]
+      .reverse()
+      .find((h) => h.sender === 'bot' && (h.text.includes('slots') || h.text.includes('ಸ್ಲಾಟ್‌ಗಳು') || h.text.includes('स्लॉट')));
     const dateMatch = lastBotMsg?.text.match(/(\d{4}-\d{2}-\d{2})/);
     const bookingDate = dateMatch ? dateMatch[1] : targetDate || now.dateStr;
 
     const slotTimeMatch =
-      userText.match(/(\d{1,2}:\d{2}\s*(?:am|pm)?)/i) || lastBotMsg?.text.match(/(\d{1,2}:\d{2}\s*(?:am|pm))/i);
+      userText.match(/(\d{1,2}:\d{2}\s*(?:am|pm)?)/i) ||
+      lastBotMsg?.text.match(/(\d{1,2}:\d{2}\s*(?:am|pm))/i);
     const chosenTime = slotTimeMatch ? slotTimeMatch[1] : '10:00 AM';
 
     const booking = await confirmBooking({
@@ -218,13 +258,19 @@ export async function processMessage(params: {
       notes: `Booked via Web Chat for ${senderName || 'Patient'}`,
     });
 
-    const confirmedReply = `Your appointment has been confirmed!\n\nBooking ID: ${booking.id.toUpperCase()}\nService: General Physician Consultation (Dr. Sneha Rao)\nDate: ${bookingDate}\nTime: ${chosenTime}\nLocation: City Health Clinic, 42 1st Main, Indiranagar.\n\nPlease arrive 10 minutes prior to your slot. Cancellation or rescheduling is free up to 2 hours in advance.`;
+    const confirmedReply = getLocalizedTemplate('booking_confirmed', dialect, {
+      id: booking.id.toUpperCase(),
+      service: 'General Physician Consultation (Dr. Sneha Rao)',
+      date: bookingDate,
+      time: chosenTime,
+      location: 'City Health Clinic, 42 1st Main, Indiranagar',
+    });
 
     await db.createMessage({
       conversation_id: convId,
       sender: 'bot',
       text: confirmedReply,
-      language: 'en',
+      language: langDetection.language,
       intent: 'booking_create',
       decision: 'act',
       confidence: 1.0,
@@ -242,20 +288,27 @@ export async function processMessage(params: {
     };
   }
 
-  // 7. LLM Orchestrator Loop (for FAQs, general inquiries, intent grounding, and unknown topics)
+  // 8. LLM Orchestrator Loop (for FAQs, general inquiries, intent grounding, and unknown topics)
   const systemPrompt = `You are the AI Front-Desk Assistant for "City Health Clinic" in Indiranagar, Bengaluru.
 Current Local Date & Time: ${now.dateStr} ${now.timeStr} (Timezone: Asia/Kolkata).
+Customer Language Detected: ${langDetection.language} (Dialect: ${dialect}, Script: ${langDetection.script}).
 
 STRICT RULES:
 1. ONLY answer questions using the clinic knowledge base below. NEVER invent prices, hours, doctor names, or facts.
 2. MEDICAL SAFETY: NEVER provide medical advice, diagnosis, medicine recommendations, or dosages. If asked about medication or medical treatment, set decision="escalate" immediately.
 3. If an inquiry cannot be answered from the knowledge base, set decision="escalate" and confidence=0.4.
-4. Keep replies polite, concise, reassuring, and mobile-friendly. Support customer's language (English, Hindi, Kannada, Hinglish).
+4. LANGUAGE & SCRIPT: Reply in the EXACT language and script the customer used:
+   - If Hindi Devanagari script was used, reply in Hindi Devanagari script.
+   - If Kannada script was used, reply in Kannada script.
+   - If Hinglish (Roman script) was used, reply in polite, natural Hinglish.
+   - If Kanglish (Roman script) was used, reply in Kanglish or clear English.
+   - If English, reply in English.
+   - Exact numbers, dates, times, booking IDs, and emergency phone numbers must NEVER be altered or mistranslated.
 5. Output valid JSON matching this exact structure:
 {
   "intent": "faq" | "booking_create" | "booking_change_or_cancel" | "availability_check" | "greeting_or_smalltalk" | "complaint" | "sensitive_or_out_of_scope" | "unknown",
   "decision": "answer" | "act" | "escalate",
-  "reply_text": "Customer reply in their language",
+  "reply_text": "Customer reply in their language and script",
   "language": "en" | "hi" | "kn",
   "confidence": 0.0 to 1.0,
   "kb_refs": ["faq_hours", ...],
@@ -280,29 +333,51 @@ Never Answer Rules: ${JSON.stringify(kbData.neverAnswer)}`;
     temperature: 0.1,
   });
 
-  // If LLM returned fallback (e.g. API keys not configured or network down)
+  // If LLM returned fallback (e.g. API keys not configured or cloud timeout)
   // Check if we have a direct high-confidence FAQ match in the knowledge base
-  if (llmResult.provider === 'fallback' && kbData.faqs.length > 0) {
-    const topFaq = kbData.faqs[0];
-    const queryTerms = userText.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
-    const textToMatch = `${topFaq.question} ${(topFaq.keywords || []).join(' ')}`.toLowerCase();
-    const matchCount = queryTerms.filter((term) => textToMatch.includes(term)).length;
+  if (llmResult.provider === 'fallback') {
+    const stopWords = new Set([
+      'the', 'and', 'for', 'with', 'you', 'your', 'have', 'are', 'what', 'where',
+      'clinic', 'does', 'can', 'about', 'from', 'this', 'that', 'our', 'here',
+      'their', 'they', 'which', 'who', 'how', 'when'
+    ]);
+    const queryTerms = userText
+      .toLowerCase()
+      .replace(/[^\w\s]/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length > 2 && !stopWords.has(w));
 
-    if (matchCount >= 2) {
-      llmResult = {
-        intent: 'faq',
-        decision: 'answer',
-        reply_text: topFaq.answer,
-        language: 'en',
-        confidence: 0.95,
-        kb_refs: [topFaq.id],
-        tool_calls: [],
-        provider: 'kb_direct',
-      };
+    if (kbData.faqs.length > 0 && queryTerms.length > 0) {
+      const topFaq = kbData.faqs[0];
+      const textToMatch = `${topFaq.question} ${topFaq.answer} ${(topFaq.keywords || []).join(' ')}`.toLowerCase();
+      const matchCount = queryTerms.filter((term) => textToMatch.includes(term)).length;
+
+      if (matchCount >= 2 || (queryTerms.length === 1 && matchCount === 1)) {
+        llmResult = {
+          intent: 'faq',
+          decision: 'answer',
+          reply_text: topFaq.answer,
+          language: langDetection.language,
+          confidence: 0.95,
+          kb_refs: [topFaq.id],
+          tool_calls: [],
+          provider: 'kb_direct',
+        };
+      } else {
+        llmResult.intent = 'unknown';
+        llmResult.decision = 'escalate';
+        llmResult.confidence = 0.3;
+        llmResult.reply_text = getLocalizedTemplate('safe_fallback', dialect);
+      }
+    } else {
+      llmResult.intent = 'unknown';
+      llmResult.decision = 'escalate';
+      llmResult.confidence = 0.3;
+      llmResult.reply_text = getLocalizedTemplate('safe_fallback', dialect);
     }
   }
 
-  // Force escalation if confidence is low, or if decision is escalate, or if intent is complaint / sensitive
+  // Force escalation if confidence is low, or if decision is escalate, or if intent is complaint / sensitive / unknown
   const shouldEscalate =
     llmResult.decision === 'escalate' ||
     llmResult.confidence < 0.6 ||
@@ -329,7 +404,7 @@ Never Answer Rules: ${JSON.stringify(kbData.neverAnswer)}`;
     conversation_id: convId,
     sender: 'bot',
     text: llmResult.reply_text,
-    language: llmResult.language,
+    language: llmResult.language || langDetection.language,
     intent: llmResult.intent,
     decision: shouldEscalate ? 'escalate' : llmResult.decision,
     confidence: llmResult.confidence,
