@@ -157,3 +157,34 @@ export interface Escalation {
   resolved_at?: string | null;
   created_at: string;
 }
+
+export interface DailySummaryMetrics {
+  totalConversations: number;
+  bookingsCreated: number;
+  bookingsCancelled: number;
+  openEscalations: number;
+  autoResolvedCount: number;
+  autoResolvedPercent: number;
+  escalatedCount: number;
+  escalatedPercent: number;
+  topIntents: Array<{ intent: string; count: number }>;
+  topQuestions: Array<{ question: string; count: number }>;
+}
+
+export interface UnansweredQuestionItem {
+  conversationId: string;
+  question: string;
+  reason: string;
+  createdAt: string;
+}
+
+export interface DailySummary {
+  id: string;
+  business_id: string;
+  date: string; // YYYY-MM-DD
+  metrics: DailySummaryMetrics;
+  highlights: string;
+  unanswered_questions: UnansweredQuestionItem[];
+  created_at: string;
+}
+

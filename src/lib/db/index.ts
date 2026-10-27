@@ -11,6 +11,9 @@ import {
   ConversationStatus,
   BookingStatus,
   EscalationStatus,
+  DailySummary,
+  DailySummaryMetrics,
+  UnansweredQuestionItem,
 } from './types';
 
 // In-memory fallback cache when Supabase credentials are not set (for local dev)
@@ -22,6 +25,7 @@ const memoryStore = {
   messages: new Map<string, Message[]>(),
   bookings: new Map<string, Booking>(),
   escalations: new Map<string, Escalation>(),
+  dailySummaries: new Map<string, DailySummary>(),
 };
 
 function getSupabase(): SupabaseClient | null {
@@ -465,6 +469,155 @@ export class DBClient {
       unreadBookingsCount,
       unreadEscalationsCount,
       totalBookingsToday,
+    };
+  }
+
+  // --- DAILY SUMMARY & ANALYTICS ---
+  async saveDailySummary(summary: DailySummary): Promise<DailySummary> {
+    if (this.supabase) {
+      await this.supabase.from('daily_summaries').upsert({
+        id: summary.id,
+        business_id: summary.business_id,
+        date: summary.date,
+        metrics: summary.metrics,
+        highlights: summary.highlights,
+        unanswered_questions: summary.unanswered_questions,
+        created_at: summary.created_at,
+      });
+    }
+    const key = `${summary.business_id}_${summary.date}`;
+    memoryStore.dailySummaries.set(key, summary);
+    return summary;
+  }
+
+  async getDailySummary(businessId: string, date: string): Promise<DailySummary | null> {
+    if (this.supabase) {
+      const { data } = await this.supabase
+        .from('daily_summaries')
+        .select('*')
+        .eq('business_id', businessId)
+        .eq('date', date)
+        .maybeSingle();
+      if (data) return data as DailySummary;
+    }
+    const key = `${businessId}_${date}`;
+    return memoryStore.dailySummaries.get(key) || null;
+  }
+
+  async getRecentDailySummaries(businessId: string, limit: number = 7): Promise<DailySummary[]> {
+    if (this.supabase) {
+      const { data } = await this.supabase
+        .from('daily_summaries')
+        .select('*')
+        .eq('business_id', businessId)
+        .order('date', { ascending: false })
+        .limit(limit);
+      if (data) return data as DailySummary[];
+    }
+    const summaries = Array.from(memoryStore.dailySummaries.values())
+      .filter((s) => s.business_id === businessId)
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, limit);
+    return summaries;
+  }
+
+  async computeDailyMetrics(businessId: string, targetDateStr: string): Promise<{
+    metrics: DailySummaryMetrics;
+    unansweredQuestions: UnansweredQuestionItem[];
+  }> {
+    const allConvs = (await this.getAllConversations(businessId)) || [];
+    const dateConvs = allConvs.filter(
+      (c) => c && (c.created_at?.startsWith(targetDateStr) || c.updated_at?.startsWith(targetDateStr))
+    );
+
+    const allBookings = (await this.findBookings(businessId)) || [];
+    const dateBookings = allBookings.filter(
+      (b) => b && (b.created_at?.startsWith(targetDateStr) || b.start_time?.startsWith(targetDateStr))
+    );
+    const bookingsCreated = dateBookings.length;
+    const bookingsCancelled = dateBookings.filter((b) => b.status === 'cancelled').length;
+
+    const allEscalations = (await this.getEscalations()) || [];
+    const dateEscalations = allEscalations.filter((e) => e && e.created_at?.startsWith(targetDateStr));
+    const openEscalations = dateEscalations.filter((e) => e.status === 'open').length;
+
+    // Aggregate messages from conversations active today
+    const intentCounts: Record<string, number> = {};
+    const questionCounts: Record<string, number> = {};
+    const unansweredQuestions: UnansweredQuestionItem[] = [];
+
+    let totalConversations = dateConvs.length;
+    let escalatedConvsCount = 0;
+
+    for (const conv of dateConvs) {
+      const msgs = (await this.getRecentMessages(conv.id, 50)) || [];
+      const isEscalated =
+        conv.status === 'needs_human' ||
+        msgs.some(
+          (m) =>
+            m.decision === 'escalate' ||
+            (m.sender === 'bot' && m.intent === 'sensitive_or_out_of_scope')
+        );
+
+      if (isEscalated) escalatedConvsCount++;
+
+      for (const m of msgs) {
+        if (m.sender === 'customer') {
+          const qText = m.text.trim();
+          questionCounts[qText] = (questionCounts[qText] || 0) + 1;
+        }
+        if (m.intent) {
+          intentCounts[m.intent] = (intentCounts[m.intent] || 0) + 1;
+        }
+        if (m.decision === 'escalate' || m.intent === 'unknown') {
+          const custMsg = msgs.find((x) => x.sender === 'customer');
+          unansweredQuestions.push({
+            conversationId: conv.id,
+            question: custMsg?.text || 'Unresolved customer query',
+            reason:
+              m.intent === 'unknown'
+                ? 'Unknown topic not covered in KB'
+                : 'Escalated to human staff',
+            createdAt: m.created_at,
+          });
+        }
+      }
+    }
+
+    if (totalConversations === 0 && (bookingsCreated > 0 || dateEscalations.length > 0)) {
+      totalConversations = Math.max(bookingsCreated, dateEscalations.length);
+    }
+
+    const autoResolvedCount = Math.max(0, totalConversations - escalatedConvsCount);
+    const autoResolvedPercent =
+      totalConversations > 0 ? Math.round((autoResolvedCount / totalConversations) * 100) : 100;
+    const escalatedPercent =
+      totalConversations > 0 ? Math.round((escalatedConvsCount / totalConversations) * 100) : 0;
+
+    const topIntents = Object.entries(intentCounts)
+      .map(([intent, count]) => ({ intent, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+
+    const topQuestions = Object.entries(questionCounts)
+      .map(([question, count]) => ({ question, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+
+    return {
+      metrics: {
+        totalConversations,
+        bookingsCreated,
+        bookingsCancelled,
+        openEscalations,
+        autoResolvedCount,
+        autoResolvedPercent,
+        escalatedCount: escalatedConvsCount,
+        escalatedPercent,
+        topIntents,
+        topQuestions,
+      },
+      unansweredQuestions: unansweredQuestions.slice(0, 10),
     };
   }
 }
