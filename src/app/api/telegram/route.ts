@@ -1,31 +1,27 @@
 // src/app/api/telegram/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { telegramAdapter } from '@/lib/channels';
+import {
+  telegramAdapter,
+  isChannelRateLimited,
+  getFriendlyRateLimitMessage,
+} from '@/lib/channels';
 import { DEMO_CLINIC_ID } from '@/lib/kb/demo-clinic';
+import { db } from '@/lib/db';
+import { processMessage } from '@/lib/orchestrator';
+import { initKnowledgeBase } from '@/lib/kb';
+
+export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   try {
-    const botToken = process.env.TELEGRAM_BOT_TOKEN;
-    const webhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
-    const ownerChatId = process.env.TELEGRAM_OWNER_CHAT_ID;
+    await initKnowledgeBase();
 
-    if (!botToken) {
+    // 1. Secret-Token Verification per Telegram Bot API standards
+    const authResult = await telegramAdapter.verifyRequest(req);
+    if (!authResult.valid) {
       return NextResponse.json(
-        { error: 'Telegram integration is disabled' },
-        { status: 503 }
-      );
-    }
-
-    // 1. Verify Secret Header: Webhook secret verification
-    if (webhookSecret) {
-      const headerSecret = req.headers.get('x-telegram-bot-api-secret-token');
-      if (headerSecret !== webhookSecret) {
-        return NextResponse.json({ error: 'Unauthorized webhook request' }, { status: 401 });
-      }
-    } else if (process.env.NODE_ENV === 'production') {
-      return NextResponse.json(
-        { error: 'TELEGRAM_WEBHOOK_SECRET must be configured in production' },
-        { status: 500 }
+        { error: authResult.error },
+        { status: authResult.status }
       );
     }
 
@@ -34,50 +30,89 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    // Handle normal text message or inline callback query
-    const message = update.message || update.edited_message;
-    const callbackQuery = update.callback_query;
-
-    const chatId = message?.chat?.id || callbackQuery?.message?.chat?.id;
-    const userText = message?.text || callbackQuery?.data;
-    const senderName =
-      message?.from?.first_name ||
-      callbackQuery?.from?.first_name ||
-      'Telegram User';
-    const senderUsername =
-      message?.from?.username || callbackQuery?.from?.username || '';
-
-    if (!chatId || !userText) {
+    // 2. Parse Incoming Update
+    const parsed = await telegramAdapter.parseIncoming(req, update);
+    if (!parsed) {
       return NextResponse.json({ ok: true });
     }
 
-    // Run orchestrator through channel adapter
-    const reply = await telegramAdapter.receive({
-      channel: 'telegram',
-      businessId: DEMO_CLINIC_ID,
-      conversationId: `tg_chat_${chatId}`,
-      customerId: `tg_user_${chatId}`,
-      senderName: senderUsername ? `${senderName} (@${senderUsername})` : senderName,
-      text: userText,
-    });
+    // 3. Duplicate Protection (Idempotency)
+    const isDuplicate = await db.isMessageProcessed('telegram', parsed.messageId);
+    if (isDuplicate) {
+      return NextResponse.json({ ok: true, duplicate: true });
+    }
+    await db.recordProcessedMessage('telegram', parsed.messageId, parsed.senderId);
 
-    // Send response back via Telegram API with slot buttons
-    await telegramAdapter.sendTelegramReply(
-      botToken,
-      chatId,
-      reply.text,
-      reply.quickReplies
+    // 4. Rate Limiting per (channel, senderId)
+    if (isChannelRateLimited('telegram', parsed.senderId, 20, 60000)) {
+      await telegramAdapter.send(parsed.senderId, {
+        text: getFriendlyRateLimitMessage(),
+      });
+      return NextResponse.json({ ok: true, rateLimited: true });
+    }
+
+    // 5. Handle /start Greeting Command
+    if (parsed.isStartCommand) {
+      const startReply = telegramAdapter.getStartReply();
+      await telegramAdapter.send(parsed.senderId, startReply);
+      return NextResponse.json({ ok: true, handled: 'start' });
+    }
+
+    // 6. Handle Non-Text Messages (Photos, Voice, Stickers, Audio, etc.)
+    if (parsed.isNonTextMessage) {
+      const nonTextReply = telegramAdapter.getNonTextReply();
+      await telegramAdapter.send(parsed.senderId, nonTextReply);
+      return NextResponse.json({ ok: true, handled: 'non_text' });
+    }
+
+    // 7. Identity & Open Conversation Mapping
+    const { customer, conversation } = await db.getOrCreateChannelConversation(
+      DEMO_CLINIC_ID,
+      'telegram',
+      parsed.senderId,
+      parsed.displayName,
+      parsed.phone
     );
 
-    // Notify clinic owner on escalations or bookings if configured
-    if (ownerChatId && (reply.decision === 'escalate' || reply.intent === 'booking_create')) {
-      const alertMsg = `Patient: ${senderName}\nDecision: ${reply.decision}\nMessage: "${userText}"\nReply: "${reply.text.slice(0, 120)}..."`;
-      await telegramAdapter.notifyOwner(botToken, ownerChatId, alertMsg);
+    // 8. Run Orchestrator Pipeline
+    const reqStart = Date.now();
+    const reply = await processMessage({
+      businessId: DEMO_CLINIC_ID,
+      channel: 'telegram',
+      conversationId: conversation.id,
+      customerId: customer.id,
+      senderName: customer.name || parsed.displayName,
+      senderContact: customer.contact || parsed.phone,
+      text: parsed.text,
+    });
+    const latencyMs = Date.now() - reqStart;
+
+    // Log operational metrics without leaking message text or PII
+    console.info(
+      JSON.stringify({
+        event: 'telegram_request_processed',
+        conversationId: conversation.id,
+        decision: reply.decision,
+        provider: reply.provider,
+        latencyMs,
+      })
+    );
+
+    // 9. Dispatch Reply with Inline Buttons
+    await telegramAdapter.send(parsed.senderId, {
+      text: reply.text,
+      quickReplies: reply.quickReplies,
+    });
+
+    // 10. Owner Alert on Escalation or Booking
+    if (reply.decision === 'escalate' || reply.intent === 'booking_create') {
+      const alertMsg = `Patient: ${customer.name || 'Telegram Patient'}\nDecision: ${reply.decision}\nIntent: ${reply.intent || 'general'}\nConv ID: ${conversation.id}`;
+      await telegramAdapter.notifyOwner(alertMsg);
     }
 
     return NextResponse.json({ ok: true });
   } catch (err: any) {
-    console.error('Telegram Webhook Error:', err);
+    console.error('Telegram Webhook Exception:', err?.message || 'Unknown error');
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
