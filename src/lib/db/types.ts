@@ -188,3 +188,11 @@ export interface DailySummary {
   created_at: string;
 }
 
+export interface ProcessedChannelMessage {
+  id: string; // "<channel>:<messageId>"
+  channel: string;
+  message_id: string;
+  sender_id: string;
+  created_at: string;
+}
+

@@ -14,6 +14,7 @@ import {
   DailySummary,
   DailySummaryMetrics,
   UnansweredQuestionItem,
+  ProcessedChannelMessage,
 } from './types';
 
 // In-memory fallback cache when Supabase credentials are not set (for local dev)
@@ -26,6 +27,7 @@ const memoryStore = {
   bookings: new Map<string, Booking>(),
   escalations: new Map<string, Escalation>(),
   dailySummaries: new Map<string, DailySummary>(),
+  processedMessages: new Map<string, ProcessedChannelMessage>(),
 };
 
 function getSupabase(): SupabaseClient | null {
@@ -211,6 +213,113 @@ export class DBClient {
 
     memoryStore.conversations.set(conv.id, conv);
     return conv;
+  }
+
+  async findOpenConversationByCustomer(
+    businessId: string,
+    customerId: string,
+    channel: string
+  ): Promise<Conversation | null> {
+    if (this.supabase) {
+      const { data, error } = await this.supabase
+        .from('conversations')
+        .select('*')
+        .eq('business_id', businessId)
+        .eq('customer_id', customerId)
+        .eq('channel', channel)
+        .neq('status', 'resolved')
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!error && data) return data as Conversation;
+    }
+    for (const conv of memoryStore.conversations.values()) {
+      if (
+        conv.business_id === businessId &&
+        conv.customer_id === customerId &&
+        conv.channel === channel &&
+        conv.status !== 'resolved'
+      ) {
+        return conv;
+      }
+    }
+    return null;
+  }
+
+  async getOrCreateChannelConversation(
+    businessId: string,
+    channel: string,
+    senderId: string,
+    displayName?: string,
+    phone?: string
+  ): Promise<{ customer: Customer; conversation: Conversation }> {
+    const customerId = `${channel}_cust_${senderId}`;
+    let customer = await this.getCustomer(customerId);
+
+    if (!customer) {
+      customer = await this.upsertCustomer({
+        id: customerId,
+        business_id: businessId,
+        name: displayName || null,
+        contact: phone || null,
+        preferred_language: 'en',
+        first_seen_at: new Date().toISOString(),
+      });
+    } else {
+      let needsUpdate = false;
+      if (displayName && !customer.name) {
+        customer.name = displayName;
+        needsUpdate = true;
+      }
+      if (phone && (!customer.contact || customer.contact !== phone)) {
+        customer.contact = phone;
+        needsUpdate = true;
+      }
+      if (needsUpdate) {
+        customer = await this.upsertCustomer(customer);
+      }
+    }
+
+    let conversation = await this.findOpenConversationByCustomer(businessId, customerId, channel);
+    if (!conversation) {
+      const convId = `${channel}_conv_${senderId}_${Date.now()}`;
+      conversation = await this.getOrCreateConversation(businessId, customerId, channel, convId);
+    }
+
+    return { customer, conversation };
+  }
+
+  // --- CHANNEL IDEMPOTENCY ---
+  async isMessageProcessed(channel: string, messageId: string): Promise<boolean> {
+    const key = `${channel}:${messageId}`;
+    if (this.supabase) {
+      const { data, error } = await this.supabase
+        .from('channel_processed_messages')
+        .select('id')
+        .eq('id', key)
+        .maybeSingle();
+      if (!error && data) return true;
+    }
+    return memoryStore.processedMessages.has(key);
+  }
+
+  async recordProcessedMessage(
+    channel: string,
+    messageId: string,
+    senderId: string
+  ): Promise<void> {
+    const key = `${channel}:${messageId}`;
+    const record: ProcessedChannelMessage = {
+      id: key,
+      channel,
+      message_id: messageId,
+      sender_id: senderId,
+      created_at: new Date().toISOString(),
+    };
+    if (this.supabase) {
+      await this.supabase.from('channel_processed_messages').upsert(record);
+    }
+    memoryStore.processedMessages.set(key, record);
   }
 
   async updateConversationStatus(id: string, status: ConversationStatus): Promise<void> {
