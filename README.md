@@ -182,6 +182,13 @@ To deploy to Vercel, configure these environment variables in your Vercel Projec
 | `GEMINI_MODEL` | **Check with Account** | Model identifier for Gemini (must verify with account models endpoint) | `gemini-2.5-flash` |
 | `XAI_MODEL` | **Check with Account** | Model identifier for Grok (must verify with account models endpoint) | `grok-2-latest` |
 | `USE_MEMORY_DB` | Dev Only | Set to `true` only for offline development without Supabase | `false` |
+| `TELEGRAM_BOT_TOKEN` | Optional | Telegram Bot token issued by @BotFather | None |
+| `TELEGRAM_WEBHOOK_SECRET` | Optional | Shared secret for `X-Telegram-Bot-Api-Secret-Token` validation | None |
+| `TELEGRAM_OWNER_CHAT_ID` | Optional | Telegram chat ID for clinic owner escalation & booking alerts | None |
+| `WHATSAPP_VERIFY_TOKEN` | Optional | Webhook verification token configured in Meta App dashboard | None |
+| `WHATSAPP_APP_SECRET` | Optional | Meta App Secret for constant-time HMAC-SHA256 payload verification | None |
+| `WHATSAPP_PHONE_NUMBER_ID` | Optional | WhatsApp Cloud API phone number ID | None |
+| `WHATSAPP_ACCESS_TOKEN` | Optional | Meta Graph API access token with `whatsapp_business_messaging` | None |
 
 ### 🔐 Security Architecture: SESSION_SECRET vs. OWNER_PASSWORD
 
@@ -219,10 +226,13 @@ npm run test:bot
 # 5. Run Owner Console, Auth & Correction Verification Suite (8/8 tests)
 npm run test:owner
 
-# 6. Run Full 30-Scenario Evaluation Suite & Before/After Replay
+# 6. Run Channel Adapters Verification Suite (Telegram, WhatsApp & Web Parity)
+npm run test:channels
+
+# 7. Run Full Evaluation Suite & Before/After Replay (65 cases)
 npm run eval
 
-# 7. Start local Next.js development server
+# 8. Start local Next.js development server
 npm run dev
 ```
 
@@ -234,12 +244,76 @@ Visit:
 
 ---
 
-## 📱 WhatsApp Cloud API Integration Path
+## 📡 Multi-Channel Architecture & Integrations
 
-While the current live demo is hosted on web chat, the codebase includes a thin channel adapter (`src/lib/channels/index.ts`) allowing deployment to WhatsApp Cloud API in 3 simple steps:
-1. **Webhook Endpoint:** An adapter at `/api/whatsapp` receives the standard WhatsApp Graph API webhook payloads (`entry[0].changes[0].value.messages[0]`).
-2. **Same Orchestrator Execution:** Passes the payload to `processMessage(...)`.
-3. **Outbound Messaging:** Posts the structured response via `https://graph.facebook.com/v21.0/{phone_number_id}/messages` using WhatsApp Interactive Button components for slot confirmations.
+The application features a decoupled channel adapter subsystem (`src/lib/channels`) built on a common `ChannelAdapter` interface:
+- **`verifyRequest(req, rawBody)`**: Enforces cryptographic signatures or secret tokens.
+- **`parseIncoming(req, body)`**: Normalizes heterogeneous platform payloads into `{ channel, senderId, messageId, text, displayName?, phone? }`.
+- **`send(recipientId, { text, quickReplies? })`**: Formats and delivers outbound replies with platform-specific interactive elements (inline buttons, list menus, contact sharing).
+
+### Channel Implementation & Testing Status
+
+| Channel | Live Webhook | Testing Status | Supported Features |
+| :--- | :---: | :---: | :--- |
+| **Customer Web Chat** (`/`) | **LIVE** | **Live Tested & Evaluated** | Multilingual chat, relative booking dates, instant responses, responsive mobile layout, session cookie ownership. |
+| **Telegram Bot** (`/api/telegram`) | Configurable | **Verified via Mock Test Suite (`npm run test:channels`)** | `X-Telegram-Bot-Api-Secret-Token` verification, inline keyboard slot buttons, `/start` disclaimer, non-text message handling, contact sharing phone verification, owner alert notifications. |
+| **WhatsApp Cloud API** (`/api/whatsapp`) | Configurable | **Verified via Mock Test Suite (`npm run test:channels`)** | GET challenge verification, constant-time `X-Hub-Signature-256` HMAC validation, interactive reply buttons (up to 3 slots), interactive list menus (> 3 slots), 24-hour service window enforcement, owner console reply delivery. |
+
+---
+
+### 1. Telegram Bot Setup Guide
+
+1. **Create Bot:** Message `@BotFather` on Telegram, create a new bot (e.g. `@CityHealthClinicBot`), and obtain your `TELEGRAM_BOT_TOKEN`.
+2. **Generate Webhook Secret:** Choose a secure random string for `TELEGRAM_WEBHOOK_SECRET`.
+3. **Register Webhook:**
+   ```bash
+   curl -F "url=https://your-domain.vercel.app/api/telegram" \
+        -F "secret_token=YOUR_TELEGRAM_WEBHOOK_SECRET" \
+        https://api.telegram.org/bot<YOUR_TELEGRAM_BOT_TOKEN>/setWebhook
+   ```
+4. **Owner Alerts (Optional):** Message `@userinfobot` to find your personal Telegram chat ID, and set `TELEGRAM_OWNER_CHAT_ID`. When patients trigger medical escalations or book appointments, the bot dispatches an immediate alert to your Telegram.
+5. **Key Telegram Capabilities:**
+   - **Interactive Slot Options:** Available appointment slots are rendered as inline keyboard buttons.
+   - **Contact Sharing:** For appointment cancellation or ownership checks, users can tap a one-click *"📱 Share Phone Number"* button (`request_contact: true`) to verify their identity without typing.
+   - **Idempotency & Rate Limiting:** Duplicate `message_id` deliveries from Telegram are ignored; requests are rate-limited per `(telegram, chatId)` at 20 msgs/min.
+
+---
+
+### 2. WhatsApp Cloud API (Meta Graph API) Setup Guide
+
+1. **Meta Developer App:** Create a Business App on [developers.facebook.com](https://developers.facebook.com) and add the **WhatsApp** product.
+2. **Obtain Credentials:**
+   - In WhatsApp > API Setup, note your **Phone number ID** (`WHATSAPP_PHONE_NUMBER_ID`) and the temporary access token.
+   - For production, create a System User in Business Settings with `whatsapp_business_messaging` permission to obtain a permanent `WHATSAPP_ACCESS_TOKEN`.
+   - In App Settings > Basic, copy your **App Secret** (`WHATSAPP_APP_SECRET`).
+3. **Register Webhook in Meta Dashboard:**
+   - **Callback URL:** `https://your-domain.vercel.app/api/whatsapp`
+   - **Verify Token:** Your chosen secret string (`WHATSAPP_VERIFY_TOKEN`).
+   - Under Webhook Fields, subscribe to **`messages`**.
+4. **Meta Test Number Allowlist Limits:**
+   - Meta developer accounts provide a free sandbox test phone number. This test number **can only deliver messages to up to 5 recipient phone numbers** added and verified in your developer dashboard "To" allowlist.
+   - For public patient traffic, add a real phone number in WhatsApp > Configuration and complete Meta Business Verification.
+5. **24-Hour Customer Service Window Policy:**
+   - Meta strictly enforces a **24-hour customer service window** for WhatsApp Business.
+   - When a patient sends a message, a 24-hour window opens. Within this window, the bot can reply with free-form text and interactive components.
+   - If more than 24 hours have elapsed since the patient's last inbound message, WhatsApp blocks free-form text messages. Our adapter automatically inspects the interaction timestamp: if expired, it safely skips delivery and logs a diagnostic warning to avoid Meta policy violations.
+6. **Key WhatsApp Capabilities:**
+   - **Interactive Reply Buttons:** When 1 to 3 slot options are returned (e.g. morning OPD slots), Meta interactive buttons are rendered.
+   - **Interactive List Menus:** When more than 3 options exist (up to 10 slots), an interactive list menu is rendered.
+   - **Phone Ownership Verification:** The sender's phone number (`message.from`) is extracted directly from the verified Meta payload and mapped to the patient's record, enabling friction-free cancellation and booking verification.
+   - **HMAC Signature Verification:** All incoming webhooks are validated using constant-time `crypto.timingSafeEqual` comparison against `X-Hub-Signature-256`.
+
+---
+
+### 3. Owner Console Reply Routing (Console to Customer Channel)
+
+When clinic staff review an escalated conversation in the Owner Console at `/owner/inbox/[id]` and send a manual reply:
+1. The message is persisted in the database message thread with `sender: "owner"`.
+2. The system checks `conversation.channel`:
+   - If `telegram`: Dispatches outbound message via Telegram Bot API with a `👨‍⚕️ City Health Clinic Staff:` prefix.
+   - If `whatsapp`: Dispatches outbound message via Meta Graph API with a `👨‍⚕️ City Health Clinic Staff:` prefix.
+   - If `web`: Delivered synchronously on next patient polling interval.
+3. If channel network delivery fails (e.g. temporary API timeout or expired window), the failure is logged and returned in the API response, but the message remains safely stored in the console database thread without data loss.
 
 ---
 

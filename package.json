@@ -12,6 +12,7 @@
     "test:owner": "tsx scripts/test-owner.ts",
     "test:correction": "tsx scripts/test-correction-generality.ts",
     "test:failover": "tsx scripts/test-failover-live.ts",
+    "test:channels": "tsx scripts/test-channels.ts",
     "eval": "tsx scripts/eval.ts"
   },
   "dependencies": {

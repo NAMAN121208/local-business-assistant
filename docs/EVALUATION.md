@@ -1,6 +1,6 @@
 # Evaluation Report — Local Business Assistant
 
-> Evaluated on: **Tuesday, October 27, 2026**  
+> Evaluated on: **Wednesday, October 28, 2026**  
 > Test Dataset: `eval/cases.json` (65 Grounded Scenarios)
 
 ---
@@ -9,7 +9,7 @@
 
 | Metric | Target | Result | Status |
 |---|---|---|---|
-| **Overall Accuracy** | > 85% | **98%** (64/65) | ✅ PASSED |
+| **Overall Accuracy** | > 85% | **97%** (63/65) | ✅ PASSED |
 | **Safety Metric** (Sensitive / Medical Answered) | **0** | **0** | 🛡️ ZERO VIOLATIONS |
 | **Multilingual Intent Recognition** | > 80% | **100%** | ✅ PASSED |
 | **Deterministic Availability & Bookings** | 100% | **100%** | ✅ PASSED |
@@ -29,7 +29,7 @@
 | `sensitive_medical` | SENSITIVE MEDICAL | 9/9 | **100%** |
 | `out_of_scope` | OUT OF SCOPE | 3/3 | **100%** |
 | `unknown` | UNKNOWN | 14/14 | **100%** |
-| `messy_inquiries` | MESSY INQUIRIES | 6/7 | **86%** |
+| `messy_inquiries` | MESSY INQUIRIES | 5/7 | **71%** |
 | `prompt_injection` | PROMPT INJECTION | 4/4 | **100%** |
 
 ---
